@@ -4,13 +4,16 @@ Called once per `/graph` session open so PMC's SchemaSidebar
 populates with the labels the operator can actually query. Read-
 only; doesn't mutate the graph.
 
-Cypher source (one round-trip via UNWIND):
-    CALL db.labels() YIELD label
-    WITH collect(label) AS node_labels
-    CALL db.relationshipTypes() YIELD relationshipType
-    WITH node_labels, collect(relationshipType) AS rel_types
-    CALL db.propertyKeys() YIELD propertyKey
-    RETURN node_labels, rel_types, collect(propertyKey) AS prop_keys
+Three procedure calls in one session (atomic enough for a
+schema-discovery scenario):
+    CALL db.labels()           YIELD label              → list[str]
+    CALL db.relationshipTypes() YIELD relationshipType   → list[str]
+    CALL db.propertyKeys()     YIELD propertyKey        → list[str]
+
+(An earlier single-Cypher form with chained `CALL` + `WITH collect()`
+collapsed to zero rows whenever any of the three procedures returned
+zero rows — the cross product wipes the prior accumulators. Three
+separate queries are simpler + correct.)
 
 Returns `{node_labels, relationship_types, property_keys}` sorted
 alphabetically so the UI sidebar has a stable display order.
@@ -26,14 +29,9 @@ from pydantic import BaseModel, Field
 
 from tools._shared.neo4j_client import get_driver
 
-_SCHEMA_CYPHER = """
-CALL db.labels() YIELD label
-WITH collect(label) AS node_labels
-CALL db.relationshipTypes() YIELD relationshipType
-WITH node_labels, collect(relationshipType) AS rel_types
-CALL db.propertyKeys() YIELD propertyKey
-RETURN node_labels, rel_types, collect(propertyKey) AS prop_keys
-"""
+_LABELS_CYPHER = "CALL db.labels() YIELD label RETURN label"
+_REL_TYPES_CYPHER = "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+_PROP_KEYS_CYPHER = "CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey"
 
 
 class SchemaInput(BaseModel):
@@ -60,21 +58,28 @@ class SchemaToolResponse(BaseModel):
 
 
 async def run(_: SchemaInput | None = None) -> SchemaToolResponse:
-    """Execute the schema-discovery Cypher and return the result."""
+    """Execute the three schema-discovery Cyphers and return the result."""
     try:
         driver = get_driver()
         async with driver.session() as session:
-            record = await (await session.run(_SCHEMA_CYPHER)).single()
-        if record is None:
-            return SchemaToolResponse(
-                ok=True, result=SchemaResult()
-            )
+            labels = [
+                r["label"]
+                async for r in await session.run(_LABELS_CYPHER)
+            ]
+            rel_types = [
+                r["relationshipType"]
+                async for r in await session.run(_REL_TYPES_CYPHER)
+            ]
+            prop_keys = [
+                r["propertyKey"]
+                async for r in await session.run(_PROP_KEYS_CYPHER)
+            ]
         return SchemaToolResponse(
             ok=True,
             result=SchemaResult(
-                node_labels=sorted(record["node_labels"]),
-                relationship_types=sorted(record["rel_types"]),
-                property_keys=sorted(record["prop_keys"]),
+                node_labels=sorted(labels),
+                relationship_types=sorted(rel_types),
+                property_keys=sorted(prop_keys),
             ),
         )
     except Exception as exc:  # noqa: BLE001 — fail loud, surface root cause

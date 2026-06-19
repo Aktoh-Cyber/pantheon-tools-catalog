@@ -40,7 +40,7 @@ from tools.librarian.query import (
     _rows_contain_graph,
     _serialize_rows,
 )
-from tools.librarian.schema import _SCHEMA_CYPHER
+from tools.librarian.schema import SchemaInput, run as run_schema
 
 # Type for an LLM call: takes a system prompt + user prompt + a JSON
 # schema, returns the parsed JSON dict. Async so the tool's `run`
@@ -251,20 +251,19 @@ async def run(input: ExplainInput) -> ExplainToolResponse:
 
 
 async def _fetch_schema() -> dict[str, list[str]]:
-    """Inline schema fetch — same Cypher as librarian.schema."""
-    driver = get_driver()
-    async with driver.session() as session:
-        record = await (await session.run(_SCHEMA_CYPHER)).single()
-    if record is None:
-        return {
-            "node_labels": [],
-            "relationship_types": [],
-            "property_keys": [],
-        }
+    """Delegate to librarian.schema rather than re-running the same
+    three Cyphers. Keeps the schema-discovery logic in one place."""
+    resp = await run_schema(SchemaInput())
+    if not resp.ok or resp.result is None:
+        # Surface as a raisable error so the caller's stage="schema"
+        # error path handles it. The original error is in `resp.error`.
+        raise RuntimeError(
+            resp.error or "librarian.schema returned a non-ok response"
+        )
     return {
-        "node_labels": sorted(record["node_labels"]),
-        "relationship_types": sorted(record["rel_types"]),
-        "property_keys": sorted(record["prop_keys"]),
+        "node_labels": resp.result.node_labels,
+        "relationship_types": resp.result.relationship_types,
+        "property_keys": resp.result.property_keys,
     }
 
 
