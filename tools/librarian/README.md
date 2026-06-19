@@ -10,10 +10,15 @@ pantheon + PMC's `/graph` UI.
 | `librarian.explain`        | `librarian/explain.py`    | no       | User + AgentService |
 | `librarian.upsert_node`    | `librarian/upsert_node.py`| yes      | AgentService only   |
 | `librarian.upsert_edge`    | `librarian/upsert_edge.py`| yes      | AgentService only   |
+| `librarian.purge_session`  | `librarian/purge_session.py`| yes (destructive) | AgentService only |
 
 Write tools are Cedar-gated via the `LibrarianWrite` action permit
-(SYNAPSE-32). Read tools rely on the default `LibrarianQuery`
-permit. AgentService vs User principal scoping is enforced by
+(SYNAPSE-32). `purge_session` is gated by the `LibrarianPurge`
+action permit (SYNAPSE-33a, aktoh policy v6) — separate from
+`LibrarianWrite` so a leaked AgentService key with only Write scope
+can't trigger destruction. Read tools rely on the default
+`LibrarianQuery` permit. AgentService vs User principal scoping is
+enforced by
 Cedar, not the tools.
 
 Defense in depth: `librarian.query` also rejects write Cypher at
