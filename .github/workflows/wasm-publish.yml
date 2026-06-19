@@ -134,12 +134,18 @@ jobs:
           #     initial `vnd.synapse.tool.wasm.v1` per their ask.
           #   - layer mediaType: `application/wasm` — unchanged, already
           #     matches what `OciToolLoader` expects.
+          # Capture the OCI manifest digest oras prints (it's the
+          # `Digest: sha256:…` line in the push output). Cosign will
+          # use this digest to identify which manifest to sign.
           oras push "$REF" \
             --artifact-type application/vnd.aktoh.synapse.tool-manifest.v1+json \
-            "${ARTIFACT}:application/wasm"
+            "${ARTIFACT}:application/wasm" | tee /tmp/oras-push.log
+          OCI_DIGEST=$(grep -E "^Digest:" /tmp/oras-push.log | awk '{print $2}')
+          if [ -z "$OCI_DIGEST" ]; then
+            echo "ERROR: could not parse Digest from oras push output" >&2
+            exit 1
+          fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          # Resolve the OCI digest oras printed; we sign it.
-          OCI_DIGEST=$(oras resolve --distribution-spec v1.1-referrers-tag "$REF")
           echo "oci_digest=$OCI_DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Cosign keyless sign
