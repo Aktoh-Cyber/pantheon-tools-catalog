@@ -372,3 +372,128 @@ async def test_query_write_rejected_at_tool_layer(neo4j_clean) -> None:
     )
     assert check.ok is True
     assert check.result.rows[0]["c"] == 0
+
+
+# --- purge_session integration ----------------------------------------------
+
+
+from tools.librarian.purge_session import (  # noqa: E402
+    PurgeSessionInput,
+    run as run_purge,
+)
+
+
+async def test_purge_session_deletes_session_nodes_only(neo4j_clean) -> None:
+    """upsert 3 nodes for session 'inv-purge', 2 for 'inv-keep'; purge
+    inv-purge; assert only the keep set remains."""
+    # session inv-purge: 3 Host nodes
+    for ip in ("10.0.0.1", "10.0.0.2", "10.0.0.3"):
+        resp = await run_node(
+            UpsertNodeInput(
+                label="Host", merge_keys=["ip"],
+                props={"ip": ip},
+                commissioned_by="infosec", session_id="inv-purge",
+            )
+        )
+        assert resp.ok is True
+
+    # session inv-keep: 2 Host nodes
+    for ip in ("10.0.1.1", "10.0.1.2"):
+        resp = await run_node(
+            UpsertNodeInput(
+                label="Host", merge_keys=["ip"],
+                props={"ip": ip},
+                commissioned_by="infosec", session_id="inv-keep",
+            )
+        )
+        assert resp.ok is True
+
+    # Purge inv-purge.
+    resp = await run_purge(
+        PurgeSessionInput(
+            session_id="inv-purge",
+            commissioned_by="infosec",
+            confirm=True,
+        )
+    )
+    assert resp.ok is True
+    assert resp.result is not None
+    assert resp.result.session_id == "inv-purge"
+    assert resp.result.deleted_count == 3
+
+    # Confirm via query: inv-keep nodes still present, inv-purge gone.
+    keep = await run_query(
+        QueryInput(
+            cypher="MATCH (n {session_id: $sid}) RETURN count(n) AS c",
+            params={"sid": "inv-keep"},
+        )
+    )
+    assert keep.ok is True
+    assert keep.result.rows[0]["c"] == 2
+
+    purged = await run_query(
+        QueryInput(
+            cypher="MATCH (n {session_id: $sid}) RETURN count(n) AS c",
+            params={"sid": "inv-purge"},
+        )
+    )
+    assert purged.ok is True
+    assert purged.result.rows[0]["c"] == 0
+
+
+async def test_purge_session_drops_incident_relationships(neo4j_clean) -> None:
+    """DETACH DELETE must drop relationships incident on purged nodes."""
+    # Create Host + Service nodes for session inv-rel.
+    await run_node(
+        UpsertNodeInput(
+            label="Host", merge_keys=["ip"],
+            props={"ip": "10.9.9.9"},
+            commissioned_by="infosec", session_id="inv-rel",
+        )
+    )
+    await run_node(
+        UpsertNodeInput(
+            label="Service", merge_keys=["port"],
+            props={"port": 8443},
+            commissioned_by="infosec", session_id="inv-rel",
+        )
+    )
+    # Create RUNS edge between them.
+    await run_edge(
+        UpsertEdgeInput(
+            rel_type="RUNS",
+            **{
+                "from": EdgeEndpoint(
+                    label="Host", merge_keys=["ip"],
+                    match={"ip": "10.9.9.9"},
+                ),
+            },
+            to=EdgeEndpoint(
+                label="Service", merge_keys=["port"],
+                match={"port": 8443},
+            ),
+            props={},
+            commissioned_by="infosec", session_id="inv-rel",
+        )
+    )
+
+    # Purge the session.
+    resp = await run_purge(
+        PurgeSessionInput(
+            session_id="inv-rel",
+            commissioned_by="infosec",
+            confirm=True,
+        )
+    )
+    assert resp.ok is True
+    assert resp.result.deleted_count == 2
+    assert resp.result.relationships_deleted == 1
+
+    # Confirm nothing left.
+    leftover = await run_query(
+        QueryInput(
+            cypher="MATCH (n {session_id: $sid}) RETURN count(n) AS c",
+            params={"sid": "inv-rel"},
+        )
+    )
+    assert leftover.result.rows[0]["c"] == 0

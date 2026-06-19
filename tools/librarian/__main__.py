@@ -35,6 +35,7 @@ from mcp.types import TextContent, Tool  # type: ignore[import-not-found]
 
 from tools.librarian import (
     explain,
+    purge_session,
     query,
     schema,
     upsert_edge,
@@ -82,6 +83,13 @@ _TOOLS = {
         "LibrarianWrite. Stamps provenance.",
         upsert_edge.UpsertEdgeInput,
         upsert_edge.run,
+    ),
+    "librarian.purge_session": (
+        "DETACH DELETE every node carrying session_id == <input>. "
+        "AgentService-only via Cedar LibrarianPurge. Requires "
+        "explicit confirm=True; wildcard session_ids rejected.",
+        purge_session.PurgeSessionInput,
+        purge_session.run,
     ),
 }
 
