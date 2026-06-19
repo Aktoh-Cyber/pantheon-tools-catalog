@@ -26,10 +26,17 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if tag exists
+      - name: Skip if tag exists or version is 0.0.0
         id: skip
         run: |
-          if git rev-parse "${{ steps.ver.outputs.tag }}" >/dev/null 2>&1; then
+          # Skip 0.0.0 — it's the project bootstrap default, not a
+          # real release. Operator bumps to 0.1.0 (or whatever) in a
+          # PR; the merge of that PR is the cut signal.
+          if [ "${{ steps.ver.outputs.version }}" = "0.0.0" ]; then
+            echo "Skipping tag-cut: pyproject version is 0.0.0 (bootstrap default)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse "${{ steps.ver.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Skipping tag-cut: ${{ steps.ver.outputs.tag }} already exists."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
