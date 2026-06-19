@@ -1,0 +1,177 @@
+name: WASM publish (synapse-tools)
+
+# SYNAPSE-51 — build pantheon-tools-catalog's WASM tools, cosign-keyless sign,
+# push to ghcr.io under the prefix layout bobby chose in cycle 98:
+#   ghcr.io/aktoh-cyber/synapse-tools-shared/<tool>:<version>          (vetted, all-tenant readable)
+#   ghcr.io/aktoh-cyber/synapse-tools-tenant/<tenant>/<tool>:<version> (bespoke per customer)
+#
+# Trigger:
+#   - Tag `<tool>-v<version>` (e.g. `fs-list-v0.1.0`) → publishes to
+#     synapse-tools-shared/<tool>:<version>.
+#   - `workflow_dispatch` with `tool`, `version`, optional `tenant_id`
+#     for the tenant-bespoke prefix.
+#
+# OCI auth: GHA OIDC → cosign-keyless via fulcio + GHCR write via
+# GITHUB_TOKEN (workflow `packages: write` permission). Per the bobby
+# decision: identity regex used by node-side cosign verify pins on the
+# `repository_owner` + workflow path + ref pattern; same identity for
+# both shared/ and tenant/ prefixes.
+
+on:
+  push:
+    tags:
+      - '*-v*'  # e.g. fs-list-v0.1.0, future tools: <tool>-v<semver>
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: 'Tool name (matches tools/<tool>/)'
+        required: true
+        type: string
+      version:
+        description: 'Version (semver without leading v)'
+        required: true
+        type: string
+      tenant_id:
+        description: 'Tenant id for bespoke push; leave blank for shared'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write   # GHCR write via GITHUB_TOKEN
+  id-token: write   # cosign keyless via GHA OIDC
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Parse tag like `fs-list-v0.1.0` → tool=fs-list, version=0.1.0.
+      # On workflow_dispatch use the inputs directly.
+      - name: Resolve tool + version
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TOOL="${{ inputs.tool }}"
+            VERSION="${{ inputs.version }}"
+            TENANT="${{ inputs.tenant_id }}"
+          else
+            TAG="${GITHUB_REF##refs/tags/}"
+            TOOL="${TAG%-v*}"
+            VERSION="${TAG##*-v}"
+            TENANT=""
+          fi
+          if [ -z "$TOOL" ] || [ -z "$VERSION" ]; then
+            echo "ERROR: tool or version empty (TOOL=$TOOL VERSION=$VERSION)" >&2
+            exit 1
+          fi
+          if [ ! -d "tools/$TOOL" ]; then
+            echo "ERROR: tools/$TOOL/ does not exist" >&2
+            exit 1
+          fi
+          if [ -n "$TENANT" ]; then
+            PREFIX="synapse-tools-tenant/$TENANT"
+          else
+            PREFIX="synapse-tools-shared"
+          fi
+          echo "tool=$TOOL"     >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust + wasm32-wasip2 target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-wasip2 --toolchain stable
+          rustup default stable
+
+      - name: Build WASM artifact
+        id: build
+        run: |
+          set -euo pipefail
+          cd tools/${{ steps.resolve.outputs.tool }}
+          DIGEST=$(./build.sh)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          ls -la out/
+
+      - name: Install cosign + oras
+        run: |
+          set -euo pipefail
+          # cosign for keyless signing
+          curl -sLO https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64
+          chmod +x cosign-linux-amd64
+          sudo mv cosign-linux-amd64 /usr/local/bin/cosign
+          # oras for pushing OCI artifacts (single-file WASM is not a docker image)
+          curl -sLO https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz
+          tar -xzf oras_1.2.0_linux_amd64.tar.gz oras
+          sudo mv oras /usr/local/bin/oras
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
+
+      - name: Push WASM to GHCR
+        id: push
+        run: |
+          set -euo pipefail
+          TOOL="${{ steps.resolve.outputs.tool }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
+          PREFIX="${{ steps.resolve.outputs.prefix }}"
+          DIGEST="${{ steps.build.outputs.digest }}"
+          REF="ghcr.io/aktoh-cyber/$PREFIX/$TOOL:$VERSION"
+          ARTIFACT="tools/$TOOL/out/$DIGEST.wasm"
+          # Push the WASM as an OCI artifact. mediaType is the wasip2
+          # component MIME convention; Synapse's OciToolLoader treats
+          # the first layer as the artifact bytes.
+          # mediaType pair aligned with synapse-side `MEDIA_MANIFEST` per
+          # synapse-claude review on this PR (cycle 99):
+          #   - artifact-type (becomes manifest config mediaType):
+          #     `application/vnd.aktoh.synapse.tool-manifest.v1+json`
+          #     — matches synapse's existing constant; renames forge's
+          #     initial `vnd.synapse.tool.wasm.v1` per their ask.
+          #   - layer mediaType: `application/wasm` — unchanged, already
+          #     matches what `OciToolLoader` expects.
+          oras push "$REF" \
+            --artifact-type application/vnd.aktoh.synapse.tool-manifest.v1+json \
+            "${ARTIFACT}:application/wasm"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          # Resolve the OCI digest oras printed; we sign it.
+          OCI_DIGEST=$(oras resolve --distribution-spec v1.1-referrers-tag "$REF")
+          echo "oci_digest=$OCI_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Cosign keyless sign
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          set -euo pipefail
+          REF="${{ steps.push.outputs.ref }}"
+          # Sign by tag; cosign resolves to manifest digest under the hood.
+          cosign sign --yes "$REF"
+
+      - name: Verify cosign signature (post-push smoke test)
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          set -euo pipefail
+          REF="${{ steps.push.outputs.ref }}"
+          # Identity regex pins the publish path; tenant-side cosign verify
+          # uses the same regex.
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/Aktoh-Cyber/pantheon-tools-catalog/.github/workflows/wasm-publish.yml@.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$REF" >/dev/null
+
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## WASM publish summary
+          - Tool: \`${{ steps.resolve.outputs.tool }}\`
+          - Version: \`${{ steps.resolve.outputs.version }}\`
+          - Prefix: \`${{ steps.resolve.outputs.prefix }}\`
+          - WASM SHA-256: \`${{ steps.build.outputs.digest }}\`
+          - OCI ref: \`${{ steps.push.outputs.ref }}\`
+          - Cosign-keyless signed + verified ✓
+          EOF
