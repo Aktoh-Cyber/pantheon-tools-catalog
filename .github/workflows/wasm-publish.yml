@@ -126,8 +126,16 @@ jobs:
           # Push the WASM as an OCI artifact. mediaType is the wasip2
           # component MIME convention; Synapse's OciToolLoader treats
           # the first layer as the artifact bytes.
+          # mediaType pair aligned with synapse-side `MEDIA_MANIFEST` per
+          # synapse-claude review on this PR (cycle 99):
+          #   - artifact-type (becomes manifest config mediaType):
+          #     `application/vnd.aktoh.synapse.tool-manifest.v1+json`
+          #     — matches synapse's existing constant; renames forge's
+          #     initial `vnd.synapse.tool.wasm.v1` per their ask.
+          #   - layer mediaType: `application/wasm` — unchanged, already
+          #     matches what `OciToolLoader` expects.
           oras push "$REF" \
-            --artifact-type application/vnd.synapse.tool.wasm.v1 \
+            --artifact-type application/vnd.aktoh.synapse.tool-manifest.v1+json \
             "${ARTIFACT}:application/wasm"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           # Resolve the OCI digest oras printed; we sign it.
