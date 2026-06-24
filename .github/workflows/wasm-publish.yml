@@ -1,21 +1,32 @@
-name: WASM publish (synapse-tools)
+name: WASM publish (pantheon-tools)
 
-# SYNAPSE-51 — build pantheon-tools-catalog's WASM tools, cosign-keyless sign,
-# push to ghcr.io under the prefix layout bobby chose in cycle 98:
-#   ghcr.io/aktoh-cyber/synapse-tools-shared/<tool>:<version>          (vetted, all-tenant readable)
-#   ghcr.io/aktoh-cyber/synapse-tools-tenant/<tenant>/<tool>:<version> (bespoke per customer)
+# SYNAPSE-51 + SYNAPSE-61 — build pantheon-tools-catalog's WASM tools,
+# cosign-keyless sign, push to ghcr.io under the canonical layout
+# resolved by bobby in cycle 311 (revised from cycle 98):
+#   ghcr.io/aktoh-cyber/pantheon-tools-catalog/<tool>:<version>          (vetted, all-tenant readable)
+#   ghcr.io/aktoh-cyber/pantheon-tools-<tenant>/<tool>:<version>         (bespoke per customer)
+#
+# The shared prefix matches the repo name (`pantheon-tools-catalog`).
+# The per-tenant prefix matches the per-tenant repo (`pantheon-tools-<tenant>`,
+# which already exist for aktoh/acmeinc/drytestinfra/lifecycletest3 + future
+# tenants per the onboarding provision). App 4062665 (Pantheon Repo Reader)
+# repo-scoped `packages:read` grants per-tenant least-privilege naturally —
+# a tenant-X node reads `pantheon-tools-catalog` + `pantheon-tools-X` only.
+# This RETIRES the deprecated `synapse-tools-{shared,tenant}/*` paths that
+# (a) didn't exist as real repos and (b) failed App-installation read checks.
 #
 # Trigger:
 #   - Tag `<tool>-v<version>` (e.g. `fs-list-v0.1.0`) → publishes to
-#     synapse-tools-shared/<tool>:<version>.
+#     pantheon-tools-catalog/<tool>:<version>.
 #   - `workflow_dispatch` with `tool`, `version`, optional `tenant_id`
 #     for the tenant-bespoke prefix.
 #
 # OCI auth: GHA OIDC → cosign-keyless via fulcio + GHCR write via
-# GITHUB_TOKEN (workflow `packages: write` permission). Per the bobby
-# decision: identity regex used by node-side cosign verify pins on the
-# `repository_owner` + workflow path + ref pattern; same identity for
-# both shared/ and tenant/ prefixes.
+# GITHUB_TOKEN (workflow `packages: write` permission). Identity regex used
+# by node-side cosign verify pins on the catalog's actual publish workflow
+# path + ref pattern (`pantheon-tools-catalog/.github/workflows/wasm-publish.yml@*`);
+# same identity for both shared/ and tenant/ prefixes regardless of which
+# prefix a particular publish lands under.
 
 on:
   push:
@@ -72,10 +83,15 @@ jobs:
             echo "ERROR: tools/$TOOL/ does not exist" >&2
             exit 1
           fi
+          # Canonical prefix layout (bobby cycle 311 / SYNAPSE-61):
+          #   shared  → pantheon-tools-catalog     (this repo's name)
+          #   tenant  → pantheon-tools-<tenant>    (per-tenant repo's name)
+          # Synapse node-side cosign verify + PAT scoping both key off these
+          # exact paths; deprecated synapse-tools-{shared,tenant}/* retired.
           if [ -n "$TENANT" ]; then
-            PREFIX="synapse-tools-tenant/$TENANT"
+            PREFIX="pantheon-tools-$TENANT"
           else
-            PREFIX="synapse-tools-shared"
+            PREFIX="pantheon-tools-catalog"
           fi
           echo "tool=$TOOL"     >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
