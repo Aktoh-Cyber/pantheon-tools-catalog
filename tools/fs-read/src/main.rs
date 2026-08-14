@@ -13,10 +13,30 @@
 //!   { "tool":"fs-read", "path", "size_bytes", "read_bytes", "sha256",
 //!     "truncated": bool, "encoding", "content": "<string>" }
 
-use base64::Engine;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
+
+/// Standard base64 (RFC 4648, with padding), implemented inline so the tool
+/// carries no extra crate. The `base64` crate traps on the node's wasmtime
+/// (proven live 2026-08-14: fs-read at 0.1.0 recorded exit_kind=trap on-node
+/// while running clean locally; it was the only Tier-0 tool pulling base64 and
+/// the only one that trapped). Dependency-free encoding sidesteps that entirely.
+fn b64_encode(input: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(A[((n >> 18) & 63) as usize] as char);
+        out.push(A[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { A[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { A[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
 
 fn fail(reason: &str) -> ! {
     println!("{}", serde_json::json!({ "tool": "fs-read", "error": reason }));
@@ -64,7 +84,7 @@ fn main() {
     };
 
     let content = match encoding {
-        "base64" => base64::engine::general_purpose::STANDARD.encode(&buf),
+        "base64" => b64_encode(&buf),
         _ => match String::from_utf8(buf.clone()) {
             Ok(s) => s,
             Err(_) => fail("content is not valid UTF-8 — retry with \"encoding\":\"base64\""),
