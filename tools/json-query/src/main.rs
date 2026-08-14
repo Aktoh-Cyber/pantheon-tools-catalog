@@ -16,9 +16,10 @@
 //!   { "tool":"json-query", "matched": bool, "result": <value>,
 //!     "keys"?: [..], "length"?: <int> }
 
-fn fail(reason: &str) -> ! {
-    println!("{}", serde_json::json!({ "tool": "json-query", "error": reason }));
-    std::process::exit(1);
+use std::process::ExitCode;
+
+fn err(reason: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({ "tool": "json-query", "error": reason.into() })
 }
 
 /// Navigate `root` by dotted `query`. A numeric segment indexes into an array;
@@ -45,10 +46,12 @@ fn navigate<'a>(root: &'a serde_json::Value, query: &str) -> Option<&'a serde_js
     Some(cur)
 }
 
-fn main() {
+/// All logic; returns the success payload or an error payload. `main` prints
+/// whichever and maps it to an ExitCode — no `process::exit`.
+fn run() -> Result<serde_json::Value, serde_json::Value> {
     let raw = std::env::args().next().unwrap_or_else(|| "{}".to_string());
-    let a: serde_json::Value = serde_json::from_str(&raw)
-        .unwrap_or_else(|e| fail(&format!("args is not valid JSON: {e}")));
+    let a: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| err(format!("args is not valid JSON: {e}")))?;
 
     // Resolve the JSON source: inline `input` (value or embedded string) or a file.
     let root: serde_json::Value = if let Some(v) = a.get("input") {
@@ -60,11 +63,10 @@ fn main() {
             other => other.clone(),
         }
     } else if let Some(p) = a.get("path_file").and_then(|v| v.as_str()) {
-        let bytes = std::fs::read(p).unwrap_or_else(|e| fail(&format!("read({p}) failed: {e}")));
-        serde_json::from_slice(&bytes)
-            .unwrap_or_else(|e| fail(&format!("{p} is not valid JSON: {e}")))
+        let bytes = std::fs::read(p).map_err(|e| err(format!("read({p}) failed: {e}")))?;
+        serde_json::from_slice(&bytes).map_err(|e| err(format!("{p} is not valid JSON: {e}")))?
     } else {
-        fail("provide 'input' (JSON value/string) or 'path_file' (path to a .json)");
+        return Err(err("provide 'input' (JSON value/string) or 'path_file' (path to a .json)"));
     };
 
     let query = a.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -103,5 +105,19 @@ fn main() {
         }
     }
 
-    println!("{}", serde_json::Value::Object(out));
+    Ok(serde_json::Value::Object(out))
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(v) => {
+            println!("{v}");
+            ExitCode::SUCCESS
+        }
+        Err(v) => {
+            // stdout, not stderr — Synapse captures stdout as the tool result.
+            println!("{v}");
+            ExitCode::from(1)
+        }
+    }
 }

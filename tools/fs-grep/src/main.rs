@@ -21,10 +21,10 @@
 use regex_lite::RegexBuilder;
 use std::fs;
 use std::path::Path;
+use std::process::ExitCode;
 
-fn fail(reason: &str) -> ! {
-    println!("{}", serde_json::json!({ "tool": "fs-grep", "error": reason }));
-    std::process::exit(1);
+fn err(reason: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({ "tool": "fs-grep", "error": reason.into() })
 }
 
 fn glob_match(pat: &str, s: &str) -> bool {
@@ -127,20 +127,22 @@ fn walk(dir: &Path, depth: usize, ctx: &Ctx, out: &mut Vec<serde_json::Value>) {
     }
 }
 
-fn main() {
+/// All logic; returns the success payload or an error payload. `main` prints
+/// whichever and maps it to an ExitCode — no `process::exit`.
+fn run() -> Result<serde_json::Value, serde_json::Value> {
     let raw = std::env::args().next().unwrap_or_else(|| "{}".to_string());
-    let a: serde_json::Value = serde_json::from_str(&raw)
-        .unwrap_or_else(|e| fail(&format!("args is not valid JSON: {e}")));
+    let a: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| err(format!("args is not valid JSON: {e}")))?;
 
-    let pattern = match a.get("pattern").and_then(|v| v.as_str()) {
-        Some(p) => p,
-        None => fail("missing required arg 'pattern' (regex string)"),
-    };
+    let pattern = a
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| err("missing required arg 'pattern' (regex string)"))?;
     let ignore_case = a.get("ignore_case").and_then(|v| v.as_bool()).unwrap_or(false);
     let re = RegexBuilder::new(pattern)
         .case_insensitive(ignore_case)
         .build()
-        .unwrap_or_else(|e| fail(&format!("invalid regex: {e}")));
+        .map_err(|e| err(format!("invalid regex: {e}")))?;
 
     let root = a.get("root").and_then(|v| v.as_str()).unwrap_or("/work").to_string();
     let ctx = Ctx {
@@ -153,7 +155,7 @@ fn main() {
 
     let root_path = Path::new(&root);
     if !root_path.exists() {
-        fail(&format!("root {root} does not exist (is it mounted into this lease?)"));
+        return Err(err(format!("root {root} does not exist (is it mounted into this lease?)")));
     }
 
     let mut out = Vec::new();
@@ -165,14 +167,25 @@ fn main() {
         out.truncate(cap_ctx.max_matches - 1);
     }
 
-    println!(
-        "{}",
-        serde_json::json!({
-            "tool": "fs-grep",
-            "pattern": pattern,
-            "count": out.len(),
-            "truncated": truncated,
-            "matches": out,
-        })
-    );
+    Ok(serde_json::json!({
+        "tool": "fs-grep",
+        "pattern": pattern,
+        "count": out.len(),
+        "truncated": truncated,
+        "matches": out,
+    }))
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(v) => {
+            println!("{v}");
+            ExitCode::SUCCESS
+        }
+        Err(v) => {
+            // stdout, not stderr — Synapse captures stdout as the tool result.
+            println!("{v}");
+            ExitCode::from(1)
+        }
+    }
 }

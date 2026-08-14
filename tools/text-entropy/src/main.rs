@@ -15,16 +15,18 @@
 //!     "printable_ratio", "distinct_bytes", "lines", "words", "high_entropy" }
 
 use std::io::Read;
+use std::process::ExitCode;
 
-fn fail(reason: &str) -> ! {
-    println!("{}", serde_json::json!({ "tool": "text-entropy", "error": reason }));
-    std::process::exit(1);
+fn err(reason: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({ "tool": "text-entropy", "error": reason.into() })
 }
 
-fn main() {
+/// All logic; returns the success payload or an error payload. `main` prints
+/// whichever and maps it to an ExitCode — no `process::exit`.
+fn run() -> Result<serde_json::Value, serde_json::Value> {
     let raw = std::env::args().next().unwrap_or_else(|| "{}".to_string());
-    let a: serde_json::Value = serde_json::from_str(&raw)
-        .unwrap_or_else(|e| fail(&format!("args is not valid JSON: {e}")));
+    let a: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| err(format!("args is not valid JSON: {e}")))?;
 
     let max_bytes = a.get("max_bytes").and_then(|v| v.as_u64()).unwrap_or(1_048_576) as usize;
 
@@ -33,31 +35,27 @@ fn main() {
         b.truncate(max_bytes);
         b
     } else if let Some(p) = a.get("path").and_then(|v| v.as_str()) {
-        let meta = std::fs::metadata(p).unwrap_or_else(|e| fail(&format!("stat({p}) failed: {e}")));
+        let meta = std::fs::metadata(p).map_err(|e| err(format!("stat({p}) failed: {e}")))?;
         if !meta.is_file() {
-            fail(&format!("{p} is not a regular file"));
+            return Err(err(format!("{p} is not a regular file")));
         }
-        let f = std::fs::File::open(p).unwrap_or_else(|e| fail(&format!("open({p}) failed: {e}")));
+        let f = std::fs::File::open(p).map_err(|e| err(format!("open({p}) failed: {e}")))?;
         let mut b = Vec::new();
         f.take(max_bytes as u64)
             .read_to_end(&mut b)
-            .unwrap_or_else(|e| fail(&format!("read({p}) failed: {e}")));
+            .map_err(|e| err(format!("read({p}) failed: {e}")))?;
         b
     } else {
-        fail("provide 'text' (string) or 'path' (string)");
+        return Err(err("provide 'text' (string) or 'path' (string)"));
     };
 
     let n = bytes.len();
     if n == 0 {
-        println!(
-            "{}",
-            serde_json::json!({
-                "tool": "text-entropy", "bytes": 0, "shannon_entropy": 0.0,
-                "normalized_entropy": 0.0, "printable_ratio": 0.0,
-                "distinct_bytes": 0, "lines": 0, "words": 0, "high_entropy": false,
-            })
-        );
-        return;
+        return Ok(serde_json::json!({
+            "tool": "text-entropy", "bytes": 0, "shannon_entropy": 0.0,
+            "normalized_entropy": 0.0, "printable_ratio": 0.0,
+            "distinct_bytes": 0, "lines": 0, "words": 0, "high_entropy": false,
+        }));
     }
 
     // byte-frequency histogram → Shannon entropy in bits/byte
@@ -100,18 +98,29 @@ fn main() {
     // English prose sits ~4.0–4.5 and stays below the line.
     let high_entropy = entropy > 4.8;
 
-    println!(
-        "{}",
-        serde_json::json!({
-            "tool": "text-entropy",
-            "bytes": n,
-            "shannon_entropy": (entropy * 10000.0).round() / 10000.0,
-            "normalized_entropy": (normalized * 10000.0).round() / 10000.0,
-            "printable_ratio": (printable_ratio * 10000.0).round() / 10000.0,
-            "distinct_bytes": distinct,
-            "lines": lines,
-            "words": words,
-            "high_entropy": high_entropy,
-        })
-    );
+    Ok(serde_json::json!({
+        "tool": "text-entropy",
+        "bytes": n,
+        "shannon_entropy": (entropy * 10000.0).round() / 10000.0,
+        "normalized_entropy": (normalized * 10000.0).round() / 10000.0,
+        "printable_ratio": (printable_ratio * 10000.0).round() / 10000.0,
+        "distinct_bytes": distinct,
+        "lines": lines,
+        "words": words,
+        "high_entropy": high_entropy,
+    }))
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(v) => {
+            println!("{v}");
+            ExitCode::SUCCESS
+        }
+        Err(v) => {
+            // stdout, not stderr — Synapse captures stdout as the tool result.
+            println!("{v}");
+            ExitCode::from(1)
+        }
+    }
 }
