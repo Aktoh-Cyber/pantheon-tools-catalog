@@ -1,0 +1,24 @@
+[package]
+name = "fs-read"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: bounded file read with sha256 (Tier 0 fs/compute)."
+
+[[bin]]
+name = "fs-read"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
