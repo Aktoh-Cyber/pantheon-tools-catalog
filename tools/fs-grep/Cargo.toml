@@ -1,0 +1,23 @@
+[package]
+name = "fs-grep"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: regex content search across files (IR/threat hunting, Tier 0)."
+
+[[bin]]
+name = "fs-grep"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+regex-lite = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]

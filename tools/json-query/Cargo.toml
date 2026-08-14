@@ -1,0 +1,22 @@
+[package]
+name = "json-query"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: parse/query/reshape JSON via a dotted path (jq-lite, Tier 0)."
+
+[[bin]]
+name = "json-query"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
