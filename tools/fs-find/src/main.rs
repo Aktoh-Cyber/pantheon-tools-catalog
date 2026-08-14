@@ -18,11 +18,11 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::ExitCode;
 use std::time::UNIX_EPOCH;
 
-fn fail(reason: &str) -> ! {
-    println!("{}", serde_json::json!({ "tool": "fs-find", "error": reason }));
-    std::process::exit(1);
+fn err(reason: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({ "tool": "fs-find", "error": reason.into() })
 }
 
 /// Minimal glob: `*` = any run (incl. empty), `?` = one char. No character
@@ -140,15 +140,17 @@ fn walk(
     }
 }
 
-fn main() {
+/// All logic; returns the success payload or an error payload. `main` prints
+/// whichever and maps it to an ExitCode — no `process::exit`.
+fn run() -> Result<serde_json::Value, serde_json::Value> {
     let raw = std::env::args().next().unwrap_or_else(|| "{}".to_string());
-    let a: serde_json::Value = serde_json::from_str(&raw)
-        .unwrap_or_else(|e| fail(&format!("args is not valid JSON: {e}")));
+    let a: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| err(format!("args is not valid JSON: {e}")))?;
 
     let root = a.get("root").and_then(|v| v.as_str()).unwrap_or("/work").to_string();
     let kind = a.get("kind").and_then(|v| v.as_str()).unwrap_or("any").to_string();
     if !matches!(kind.as_str(), "any" | "file" | "dir") {
-        fail("kind must be 'any', 'file', or 'dir'");
+        return Err(err("kind must be 'any', 'file', or 'dir'"));
     }
     let max_depth = a.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
     let max_results = a.get("max_results").and_then(|v| v.as_u64()).unwrap_or(1000) as usize;
@@ -164,7 +166,7 @@ fn main() {
 
     let root_path = Path::new(&root);
     if !root_path.exists() {
-        fail(&format!("root {root} does not exist (is it mounted into this lease?)"));
+        return Err(err(format!("root {root} does not exist (is it mounted into this lease?)")));
     }
 
     let mut out = Vec::new();
@@ -174,14 +176,25 @@ fn main() {
         out.truncate(max_results);
     }
 
-    println!(
-        "{}",
-        serde_json::json!({
-            "tool": "fs-find",
-            "root": root,
-            "count": out.len(),
-            "truncated": truncated,
-            "results": out,
-        })
-    );
+    Ok(serde_json::json!({
+        "tool": "fs-find",
+        "root": root,
+        "count": out.len(),
+        "truncated": truncated,
+        "results": out,
+    }))
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(v) => {
+            println!("{v}");
+            ExitCode::SUCCESS
+        }
+        Err(v) => {
+            // stdout, not stderr — Synapse captures stdout as the tool result.
+            println!("{v}");
+            ExitCode::from(1)
+        }
+    }
 }
