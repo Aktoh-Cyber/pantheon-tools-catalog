@@ -1,7 +1,6 @@
 # service-remediate
 
-**Tier 3 — WRITE.** Drive a service to a desired state (`running | stopped | enabled |
-disabled | restarted`) through the M11 service provider. The first write-tier tool;
+**Tier 3 — WRITE.** Drive a service to a desired state (`running | restarted | enabled | disabled`) through the M11 service provider. The first write-tier tool;
 built to make host mutation boring:
 
 - **Dry-run by default** — `"apply": true` is required to mutate; otherwise returns the plan.
@@ -9,6 +8,11 @@ built to make host mutation boring:
 - **Verify-after-write** — re-reads status; `verified:false` if the state didn't move.
 - **Refuses unknown targets** — never enables/restarts a service the back-end can't see.
 - **Honest denial** — missing api ⇒ exit 1 naming it.
+
+## Not supported: `stopped`
+The M11 service provider has no `stop` primitive (only restart/enable/disable; `disable`
+is boot-config and does not stop a running service), so this tool refuses `desired:stopped`
+rather than pretend. Filed as a provider gap: add `service.stop`.
 
 ## Gate
 Requires (a) lease `host_apis`: `service.status` + the action's write api, and (b) the

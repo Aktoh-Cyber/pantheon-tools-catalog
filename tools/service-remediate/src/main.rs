@@ -17,10 +17,11 @@
 //!
 //! Args:
 //!   { "name": "<service>" (REQUIRED),
-//!     "desired": "running" | "stopped" | "enabled" | "disabled" | "restarted",
+//!     "desired": "running" | "restarted" | "enabled" | "disabled",
 //!     "apply": false (default) }
+//!   ("stopped" is deliberately NOT supported — the provider has no stop primitive; see run().)
 //! host_apis needed: service.status (always) + service.restart (running/restarted),
-//!   service.enable (enabled), service.disable (stopped/disabled).
+//!   service.enable (enabled), service.disable (disabled).
 //! Output: { plan:[...actions], changed, applied, verified, before, after, reason }
 //! ExitCode contract: exit 0 for an evaluated request (incl. dry-run + no-op);
 //! exit 1 for arg errors, unknown target, provider denial/error.
@@ -68,13 +69,20 @@ fn run() -> Result<serde_json::Value, serde_json::Value> {
     let apply = a.get("apply").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // Plan: which write action(s) reach `desired`, and does the current state already satisfy it?
+    //
+    // HONESTY NOTE (found live 2026-08-18): the M11 service provider exposes exactly
+    // restart | enable | disable | status — there is NO `stop` primitive. On systemd,
+    // `disable` only changes boot config (a running unit keeps running); on SysV it
+    // runs `service X disable`, which most init scripts don't implement. So this tool
+    // cannot truthfully offer "stopped": it refuses rather than pretending `disable`
+    // stops anything. Filed as a provider gap (add service.stop to synapse-host).
     let (actions, satisfied_by): (Vec<&str>, fn(&str) -> bool) = match desired {
         "running"   => (vec!["restart"], |s| s == "running"),
-        "restarted" => (vec!["restart"], |_| false),           // never satisfied: a restart is a restart
-        "stopped"   => (vec!["disable"], |s| s == "stopped"),  // provider has no plain 'stop'; disable is the stop-and-keep-down primitive
-        "enabled"   => (vec!["enable"],  |_| false),           // enable is boot-config; status can't observe it — always plan it, rely on provider idempotency
-        "disabled"  => (vec!["disable"], |s| s == "stopped"),
-        other => return Err(err(format!("desired must be running|stopped|enabled|disabled|restarted (got {other:?})"))),
+        "restarted" => (vec!["restart"], |_| false),   // never satisfied: a restart is a restart
+        "enabled"   => (vec!["enable"],  |_| false),   // boot-config; status can't observe it — always plan, rely on provider idempotency
+        "disabled"  => (vec!["disable"], |_| false),   // boot-config only; does NOT stop a running service (see note)
+        "stopped"   => return Err(err("desired=stopped is not supported: the host service provider has no stop primitive (only restart|enable|disable); `disable` changes boot config and does not stop a running service. Use desired=disabled for boot-config, or wait for service.stop in synapse-host.")),
+        other => return Err(err(format!("desired must be running|restarted|enabled|disabled (got {other:?})"))),
     };
 
     let before = read(name)?;
@@ -101,7 +109,11 @@ fn run() -> Result<serde_json::Value, serde_json::Value> {
     }
     for a in &actions { write(a, name)?; }
     let after = read(name)?;
-    let verified = match desired { "enabled" | "restarted" => true, _ => satisfied_by(after) };
+    // running: verified iff status now reads running. restarted/enabled/disabled: the
+    // write's effect isn't observable via status (a restart is instantaneous; enable/
+    // disable are boot-config) — report the write's success honestly as verified:true
+    // ONLY because the provider returned Ok; `after` is still surfaced for the caller.
+    let verified = match desired { "running" => satisfied_by(after), _ => true };
     Ok(serde_json::json!({ "tool": "service-remediate", "name": name, "desired": desired,
         "before": before, "after": after, "plan": plan, "changed": before != after || desired == "restarted",
         "applied": true, "verified": verified,
