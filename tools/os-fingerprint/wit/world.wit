@@ -1,0 +1,9 @@
+// os-fingerprint — Tier-1 catalog tool.
+// A wasi:cli command that imports the M11 host inventory provider. Built as a plain
+// wasm32-wasip2 binary with wit-bindgen's generate! (no cargo-component), so it flows
+// through the same wasm-publish path as every Tier-0 tool.
+package pantheon:tools;
+
+world os-fingerprint {
+    import synapse:host/inventory@0.1.0;
+}
