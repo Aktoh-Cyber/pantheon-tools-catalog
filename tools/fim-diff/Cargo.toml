@@ -1,0 +1,23 @@
+[package]
+name = "fim-diff"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: file-integrity drift — fresh sha256 snapshot of a tree vs a saved baseline (added/removed/modified) (Tier 5)."
+
+[[bin]]
+name = "fim-diff"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
