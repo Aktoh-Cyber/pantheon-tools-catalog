@@ -1,0 +1,9 @@
+package pantheon:tools;
+
+// service-remediate — Tier 3 (WRITE). Imports only the service interface;
+// the lease must grant service.status (always) + service.restart / enable /
+// disable per the requested action, and the CP grant floor (synapse #137)
+// requires the principal to be remediation-entitled.
+world service-remediate {
+    import synapse:host/service@0.1.0;
+}
