@@ -1,0 +1,5 @@
+package pantheon:tools;
+
+world package-check {
+    import synapse:host/packages@0.1.0;
+}

@@ -1,0 +1,23 @@
+[package]
+name = "package-check"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: is package X installed (>= version Y)? via the M11 packages provider (Tier 2, host.package.query)."
+
+[[bin]]
+name = "package-check"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+wit-bindgen = "0.41"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]

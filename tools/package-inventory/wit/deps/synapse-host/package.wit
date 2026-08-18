@@ -1,0 +1,51 @@
+package synapse:host@0.1.0;
+
+/// Package-manager-backed first-party host API.
+///
+/// SSOT §"Runtime and tool model" mandates first-party host providers as the
+/// ONLY path to privileged host operations. The WASI sandbox NEVER gets
+/// ambient host authority — every privileged op flows through one of these
+/// named WIT-imported interfaces and is audited at the RPC level.
+///
+/// The names of the functions are the API IDs ("package.query",
+/// "package.install", "package.uninstall") used by the per-lease capability
+/// vector (`host_apis`) — see M5. The interface itself is named
+/// `packages` (plural) because `package` is reserved in the WIT grammar.
+interface packages {
+    /// Result record for a single package query.
+    record package-info {
+        /// Canonical package name as known to the underlying package manager.
+        name: string,
+        /// Installed (or installable) version string. Empty if the package is
+        /// not installed AND the manager cannot report a remote version.
+        version: string,
+        /// Which back-end satisfied the request: `apt`, `dnf`, `yum`, `apk`,
+        /// `brew`, `winget`, ...
+        source: string,
+        /// Whether the package is currently installed on this host.
+        installed: bool,
+    }
+
+    /// Errors a package operation can return. `denied` is the per-lease
+    /// capability gate; `bad-input` is name sanitization; `transient-error`
+    /// wraps any back-end failure (non-zero exit, stderr, exec failure).
+    variant package-error {
+        not-found,
+        denied,
+        transient-error(string),
+        bad-input(string),
+    }
+
+    /// Look up a single package by name. Does not require admin privileges
+    /// on most backends, but is still capability-gated so an operator can
+    /// keep tools from enumerating the host's installed software.
+    query: func(name: string) -> result<package-info, package-error>;
+
+    /// Install (or upgrade to) the named package. The `version` parameter is
+    /// optional — when `none`, the back-end picks the latest version it can
+    /// resolve.
+    install: func(name: string, version: option<string>) -> result<_, package-error>;
+
+    /// Remove the named package.
+    uninstall: func(name: string) -> result<_, package-error>;
+}

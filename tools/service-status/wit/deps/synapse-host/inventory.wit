@@ -1,0 +1,35 @@
+package synapse:host@0.1.0;
+
+/// Read-only inventory of installed software + host OS facts.
+///
+/// `inventory.list-installed` is the heavy one (enumerates every installed
+/// package); `inventory.os-info` is a cheap parse of `/etc/os-release` or
+/// the equivalent on macOS / Windows.
+interface inventory {
+    use packages.{package-info};
+
+    /// OS family. Mirrors the Pulumi-level tenancy detection — kept narrow
+    /// on purpose so policy authors can target a small enum rather than a
+    /// freeform string.
+    variant os-kind {
+        linux-debian,
+        linux-rhel,
+        linux-alpine,
+        macos,
+        windows,
+        other(string),
+    }
+
+    record host-os {
+        kind: os-kind,
+        version: string,
+        arch: string,
+    }
+
+    /// List every installed package the back-end can enumerate. Empty list
+    /// is a valid response (e.g. no matching back-end is available).
+    list-installed: func() -> list<package-info>;
+
+    /// Report the host OS family + version + arch.
+    os-info: func() -> host-os;
+}

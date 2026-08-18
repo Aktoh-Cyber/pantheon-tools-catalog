@@ -1,0 +1,5 @@
+package pantheon:tools;
+
+world package-inventory {
+    import synapse:host/inventory@0.1.0;
+}
