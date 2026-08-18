@@ -1,0 +1,37 @@
+package synapse:host@0.1.0;
+
+/// Service-manager-backed first-party host API.
+///
+/// Same audit + capability-gate model as `package`: every function is named
+/// after its API ID (`service.restart`, `service.status`, `service.enable`,
+/// `service.disable`) and gated through the per-lease capability vector.
+interface service {
+    /// Current runtime status of a service.
+    enum service-status {
+        running,
+        stopped,
+        failed,
+        unknown,
+    }
+
+    /// Errors a service operation can return.
+    variant service-error {
+        not-found,
+        denied,
+        transient-error(string),
+    }
+
+    /// Restart the named service. On systemd this is `systemctl restart`,
+    /// on macOS `launchctl kickstart -k`, on Windows `sc stop`/`sc start`.
+    restart: func(name: string) -> result<_, service-error>;
+
+    /// Report the current status of the named service.
+    status: func(name: string) -> result<service-status, service-error>;
+
+    /// Mark the service to start at boot (`systemctl enable`,
+    /// `launchctl enable`, `sc config start=auto`).
+    enable: func(name: string) -> result<_, service-error>;
+
+    /// Mark the service to NOT start at boot.
+    disable: func(name: string) -> result<_, service-error>;
+}
