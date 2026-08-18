@@ -1,0 +1,11 @@
+// compliance-scan — Tier-2 flagship. Composes the three M11 read-only providers to
+// evaluate a policy bundle. Imports ONLY read-only interfaces; it can never mutate
+// host state even if over-granted (packages.install/uninstall + service.* writes
+// are gated per-api_id on the node regardless).
+package pantheon:tools;
+
+world compliance-scan {
+    import synapse:host/inventory@0.1.0;
+    import synapse:host/packages@0.1.0;
+    import synapse:host/service@0.1.0;
+}
