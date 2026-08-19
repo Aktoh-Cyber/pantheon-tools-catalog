@@ -186,6 +186,27 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$REF" >/dev/null
 
+      # B7 (2026-08-19): register the release in the control plane's SHARED catalog
+      # registry so ANY tenant can invoke it without a per-tenant synapse.upload_tool
+      # row. `tool_release` is per-tenant; forgetting upload_tool used to produce a
+      # lease with no tool_name → node "cannot probe OCI prefixes" → a 30 s hang that
+      # looks exactly like a trap (hit live 2026-08-18). The WASM-layer OCI digest ==
+      # sha256(artifact bytes) == steps.build.outputs.digest, so no manifest fetch
+      # needed. Shared-prefix publishes only — tenant (bespoke) publishes are
+      # registered by the tenant via upload_tool as before. Non-fatal on a CP blip
+      # (warning, not failure): the artifact is already published + signed.
+      - name: Register in control-plane catalog registry
+        if: steps.resolve.outputs.prefix == 'pantheon-tools-catalog'
+        env:
+          CP_API_KEY: ${{ secrets.CP_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CP_API_KEY:-}" ]; then echo "::warning::CP_API_KEY not set — skipping catalog registration (tenants will need upload_tool)"; exit 0; fi
+          BODY=$(printf '{"tool_digest":"sha256:%s","tool_name":"%s","tool_version":"%s","published_by":"wasm-publish run %s"}'             "${{ steps.build.outputs.digest }}" "${{ steps.resolve.outputs.tool }}" "${{ steps.resolve.outputs.version }}" "${{ github.run_id }}")
+          CODE=$(curl -sS -o /tmp/reg.json -w '%{http_code}' -X POST "https://synapse.aktohcyber.com/v2/catalog/tools"             -H "x-api-key: ${CP_API_KEY}" -H 'content-type: application/json' -H 'user-agent: wasm-publish' --data "$BODY" || echo 000)
+          if [ "$CODE" = "200" ]; then echo "::notice::registered ${{ steps.resolve.outputs.tool }}@${{ steps.resolve.outputs.version }} (sha256:${{ steps.build.outputs.digest }}) in the catalog registry"; cat /tmp/reg.json
+          else echo "::warning::catalog registration returned HTTP $CODE — $(cat /tmp/reg.json 2>/dev/null | head -c 300). Tenants can still upload_tool manually."; fi
+
       - name: Summary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
