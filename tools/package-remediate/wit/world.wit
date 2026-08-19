@@ -1,0 +1,9 @@
+package pantheon:tools;
+
+// package-remediate — Tier 3 (WRITE). Imports only the packages interface;
+// the lease must grant package.query (always) + package.install / package.uninstall
+// per the desired state, and the CP grant floor (synapse #137) requires the
+// principal to be remediation-entitled.
+world package-remediate {
+    import synapse:host/packages@0.1.0;
+}
