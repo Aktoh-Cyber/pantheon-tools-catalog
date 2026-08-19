@@ -1,0 +1,23 @@
+[package]
+name = "package-remediate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: ensure a package is present (>= version) or absent — idempotent, dry-run by default, verify-after-write, never_remove denylist (Tier 3 WRITE, host.package.*)."
+
+[[bin]]
+name = "package-remediate"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+wit-bindgen = "0.41"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
