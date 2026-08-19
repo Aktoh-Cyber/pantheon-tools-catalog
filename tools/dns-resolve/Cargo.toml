@@ -1,0 +1,25 @@
+[package]
+name = "dns-resolve"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: resolve hostnames to addresses (Tier 4, net:direct; uses the sandbox name-lookup capability)."
+
+[[bin]]
+name = "dns-resolve"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+# Outside the workspace so the catalog repo's Python ecosystem doesn't
+# accidentally pick this up as a cargo workspace member. Build via
+# `cd tools/dns-resolve && cargo build --release --target wasm32-wasip2`.
+[workspace]
