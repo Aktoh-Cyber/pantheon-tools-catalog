@@ -1,0 +1,23 @@
+[package]
+name = "log-triage"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: triage a tree of log files — auth failures, privilege events, error bursts, public-IP IOCs, suspicious commands, leaked secrets (masked). Pure fs/compute (Tier 5)."
+
+[[bin]]
+name = "log-triage"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+regex-lite = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
