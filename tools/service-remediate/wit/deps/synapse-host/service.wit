@@ -25,6 +25,12 @@ interface service {
     /// on macOS `launchctl kickstart -k`, on Windows `sc stop`/`sc start`.
     restart: func(name: string) -> result<_, service-error>;
 
+    /// Stop a running service (2026-08-19, synapse #138). `disable` is boot-config only
+    /// (a running unit keeps running) — this is the primitive that actually halts it.
+    /// systemd `systemctl stop`, SysV `service <name> stop`, launchd
+    /// `launchctl kill SIGTERM system/<name>`, Windows `sc.exe stop`.
+    stop: func(name: string) -> result<_, service-error>;
+
     /// Report the current status of the named service.
     status: func(name: string) -> result<service-status, service-error>;
 
