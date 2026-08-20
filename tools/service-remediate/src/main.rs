@@ -109,7 +109,20 @@ fn run() -> Result<serde_json::Value, serde_json::Value> {
             "reason": "dry-run: pass \"apply\":true to execute the plan" }));
     }
     for a in &actions { write(a, name)?; }
-    let after = read(name)?;
+    // Verify with a settle-retry (0.1.3): a SysV init script's `status` reads the
+    // pidfile, and `stop` returns before the pidfile is reaped — the very first
+    // re-read can report the OLD state. Found live 2026-08-20: the first real
+    // `service.stop` stopped cron (ground truth: no process) while the immediate
+    // re-read still said "running", so 0.1.2 honestly reported verified:false on
+    // a write that succeeded. Re-read up to 5× at 200 ms until the state moves.
+    let mut after = read(name)?;
+    if matches!(desired, "running" | "stopped") {
+        for _ in 0..5 {
+            if satisfied_by(after) { break; }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            after = read(name)?;
+        }
+    }
     // running/stopped: verified iff status now reads the desired state. restarted/enabled/disabled: the
     // write's effect isn't observable via status (a restart is instantaneous; enable/
     // disable are boot-config) — report the write's success honestly as verified:true
