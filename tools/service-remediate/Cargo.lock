@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "service-remediate"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde_json",
  "wit-bindgen",
