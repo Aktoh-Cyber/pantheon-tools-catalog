@@ -1,0 +1,9 @@
+package pantheon:tools;
+
+// tls-inspect — Tier 4 (network, via host). The NODE performs the handshake
+// (synapse #147: wasip2 has no in-sandbox TLS stack); the sandbox itself needs
+// NO network capability. The lease must grant host_apis tls.inspect AND name
+// the target in the destinations allowlist (same grammar as net:direct).
+world tls-inspect {
+    import synapse:host/tls@0.1.0;
+}
