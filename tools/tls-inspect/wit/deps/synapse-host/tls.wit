@@ -1,0 +1,47 @@
+package synapse:host@0.1.0;
+
+/// Host-side TLS endpoint inspection (synapse #147, 2026-08-20).
+///
+/// wasip2 has no viable in-sandbox TLS stack (ring / aws-lc don't build for
+/// wasm32-wasip2), so the NODE performs the handshake natively and returns
+/// certificate facts to the sandbox. Read-only (`tls.inspect` is NOT a host
+/// write api_id); the target must ALSO be permitted by the lease's
+/// destinations allowlist — the same grammar the sandbox socket path
+/// enforces — so a tool cannot probe hosts the lease never named.
+///
+/// Certificate VALIDITY is deliberately not enforced: inspecting endpoints
+/// with expired or self-signed certs is the point of the API. The handshake
+/// accepts any chain and reports what was presented.
+interface tls {
+    /// Facts about the endpoint's presented certificate + negotiated session.
+    record tls-info {
+        subject: string,
+        issuer: string,
+        /// RFC3339.
+        not-before: string,
+        /// RFC3339.
+        not-after: string,
+        /// Negative once expired.
+        days-until-expiry: s64,
+        sans: list<string>,
+        chain-len: u32,
+        /// e.g. "TLSv1_3".
+        protocol: string,
+        /// e.g. "TLS13_AES_256_GCM_SHA384".
+        cipher: string,
+        self-signed: bool,
+    }
+
+    variant tls-error {
+        /// `tls.inspect` not granted in the lease's host_apis.
+        denied,
+        /// Target not permitted by the lease's destinations allowlist.
+        destination-denied,
+        /// TCP-level failure (refused, timeout, resolution).
+        connect-error(string),
+        /// TLS-level failure (protocol error, no certificate presented).
+        handshake-error(string),
+    }
+
+    inspect: func(host: string, port: u16) -> result<tls-info, tls-error>;
+}

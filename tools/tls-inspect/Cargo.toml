@@ -1,0 +1,20 @@
+[package]
+name = "tls-inspect"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: TLS endpoint inspection — cert chain, expiry, SANs, protocol (Tier 4, host.tls.inspect; sandbox stays net:none)."
+
+[[bin]]
+name = "tls-inspect"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+wit-bindgen = "0.41"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
