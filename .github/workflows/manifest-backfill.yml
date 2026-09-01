@@ -54,17 +54,23 @@ jobs:
           set -euo pipefail
           PREFIX="ghcr.io/aktoh-cyber/pantheon-tools-catalog"
           pushed=0 skipped=0 missing=0
-          # Latest published version per tool, from the publish-trigger tags.
+          # Latest published version per tool, from ghcr's OWN tag list —
+          # git tags are unreliable (most tools were published via
+          # workflow_dispatch, which creates no git tag; the 2026-09-01
+          # dry run found tags for only 2 of 24 tools). Version tags are
+          # bare semver; sidecar tags (sha256-*.manifest/.sig) filtered out.
           for tool_dir in tools/*/; do
             TOOL=$(basename "$tool_dir")
-            VERSION=$(git tag --list "${TOOL}-v*" | sed "s/^${TOOL}-v//" | sort -V | tail -1)
+            [ "$TOOL" = "_shared" ] && continue
+            VERSION=$(oras repo tags "$PREFIX/$TOOL" 2>/dev/null \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
             if [ -z "$VERSION" ]; then
-              echo "::warning::$TOOL: no publish tag found — skipping"
+              echo "::warning::$TOOL: no version tag on ghcr — skipping"
               missing=$((missing+1)); continue
             fi
             REF="$PREFIX/$TOOL:$VERSION"
             if ! OCI_DIGEST=$(oras resolve "$REF" 2>/dev/null); then
-              echo "::warning::$TOOL@$VERSION: not on ghcr ($REF) — skipping"
+              echo "::warning::$TOOL@$VERSION: resolve failed ($REF) — skipping"
               missing=$((missing+1)); continue
             fi
             HEX="${OCI_DIGEST#sha256:}"
