@@ -205,9 +205,9 @@ jobs:
           # tier). If a preview-language tool (python/typescript) ever lands,
           # read it from the tool's own metadata instead of this constant.
           printf '{"schema_version":1,"name":"%s","version":"%s","language":"rust","metadata":{"commit":"%s","published_by":"wasm-publish run %s"}}' \
-            "$TOOL" "$VERSION" "${{ github.sha }}" "${{ github.run_id }}" > /tmp/tool-manifest.json
+            "$TOOL" "$VERSION" "${{ github.sha }}" "${{ github.run_id }}" > tool-manifest.json
           oras push "ghcr.io/aktoh-cyber/$PREFIX/$TOOL:sha256-${HEX}.manifest" \
-            /tmp/tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json
+            tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json
           echo "::notice::manifest sidecar pushed for $TOOL@$VERSION (sha256-${HEX}.manifest)"
 
       # B7 (2026-08-19): register the release in the control plane's SHARED catalog

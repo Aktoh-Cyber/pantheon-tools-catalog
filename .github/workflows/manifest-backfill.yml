@@ -84,9 +84,9 @@ jobs:
               pushed=$((pushed+1)); continue
             fi
             printf '{"schema_version":1,"name":"%s","version":"%s","language":"rust","metadata":{"backfilled_by":"manifest-backfill run %s"}}' \
-              "$TOOL" "$VERSION" "${{ github.run_id }}" > /tmp/tool-manifest.json
+              "$TOOL" "$VERSION" "${{ github.run_id }}" > tool-manifest.json
             oras push "$SIDECAR" \
-              /tmp/tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json >/dev/null
+              tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json >/dev/null
             echo "$TOOL@$VERSION: sidecar pushed ($SIDECAR)"
             pushed=$((pushed+1))
           done
