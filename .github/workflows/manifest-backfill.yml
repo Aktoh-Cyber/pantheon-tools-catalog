@@ -1,0 +1,87 @@
+# Manifests-over-proxy backfill (2026-09-01, synapse #157).
+#
+# No catalog tool had ever shipped the tool-manifest sidecar synapse
+# admission reads for tier/language — wasm-publish pushed only the WASM
+# layer, so every admission (proxy AND direct-OCI path) logged
+# `tier=unknown`. wasm-publish now attaches the sidecar on publish; this
+# one-shot workflow backfills every ALREADY-published tool WITHOUT
+# rebuilding anything (a rebuild could change the WASM digest and churn
+# `catalog_release`).
+#
+# For each `<tool>-v<version>` git tag (the publish trigger convention):
+#   1. resolve the OCI manifest digest of ghcr…/<tool>:<version>
+#   2. skip if `sha256-<hex>.manifest` already exists
+#   3. push a minimal ToolManifest JSON as the sidecar (advisory
+#      metadata; language=rust — the whole catalog is Rust/wasip2 today)
+name: manifest-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be pushed without pushing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need all tags
+
+      - name: Install oras
+        run: |
+          set -euo pipefail
+          curl -sLO https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz
+          tar -xzf oras_1.2.0_linux_amd64.tar.gz oras
+          sudo mv oras /usr/local/bin/oras
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
+
+      - name: Backfill manifest sidecars
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          PREFIX="ghcr.io/aktoh-cyber/pantheon-tools-catalog"
+          pushed=0 skipped=0 missing=0
+          # Latest published version per tool, from the publish-trigger tags.
+          for tool_dir in tools/*/; do
+            TOOL=$(basename "$tool_dir")
+            VERSION=$(git tag --list "${TOOL}-v*" | sed "s/^${TOOL}-v//" | sort -V | tail -1)
+            if [ -z "$VERSION" ]; then
+              echo "::warning::$TOOL: no publish tag found — skipping"
+              missing=$((missing+1)); continue
+            fi
+            REF="$PREFIX/$TOOL:$VERSION"
+            if ! OCI_DIGEST=$(oras resolve "$REF" 2>/dev/null); then
+              echo "::warning::$TOOL@$VERSION: not on ghcr ($REF) — skipping"
+              missing=$((missing+1)); continue
+            fi
+            HEX="${OCI_DIGEST#sha256:}"
+            SIDECAR="$PREFIX/$TOOL:sha256-${HEX}.manifest"
+            if oras resolve "$SIDECAR" >/dev/null 2>&1; then
+              echo "$TOOL@$VERSION: sidecar already present — skipping"
+              skipped=$((skipped+1)); continue
+            fi
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "DRY RUN: would push $SIDECAR"
+              pushed=$((pushed+1)); continue
+            fi
+            printf '{"schema_version":1,"name":"%s","version":"%s","language":"rust","metadata":{"backfilled_by":"manifest-backfill run %s"}}' \
+              "$TOOL" "$VERSION" "${{ github.run_id }}" > /tmp/tool-manifest.json
+            oras push "$SIDECAR" \
+              /tmp/tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json >/dev/null
+            echo "$TOOL@$VERSION: sidecar pushed ($SIDECAR)"
+            pushed=$((pushed+1))
+          done
+          echo "## Backfill: pushed=$pushed skipped=$skipped missing=$missing" | tee -a "$GITHUB_STEP_SUMMARY"

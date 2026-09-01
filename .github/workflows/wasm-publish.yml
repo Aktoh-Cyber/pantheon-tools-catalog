@@ -186,6 +186,30 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$REF" >/dev/null
 
+      # Manifests-over-proxy (2026-09-01, synapse #157): publish the tool-manifest
+      # sidecar synapse-side admission reads for tier/language. Without it EVERY
+      # admission logs `tier=unknown` — no catalog tool had ever shipped one.
+      # Sidecar tag derivation must match synapse-oci's `sidecar_reference`:
+      # `sha256-<OCI-manifest-digest-hex>.manifest` on the same repo. Advisory
+      # metadata (never executed); not cosign-signed, same as the .sig layout
+      # convention it rides beside.
+      - name: Push tool-manifest sidecar
+        run: |
+          set -euo pipefail
+          TOOL="${{ steps.resolve.outputs.tool }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
+          PREFIX="${{ steps.resolve.outputs.prefix }}"
+          OCI_DIGEST="${{ steps.push.outputs.oci_digest }}"
+          HEX="${OCI_DIGEST#sha256:}"
+          # Language: every catalog tool today is Rust on wasm32-wasip2 (GA
+          # tier). If a preview-language tool (python/typescript) ever lands,
+          # read it from the tool's own metadata instead of this constant.
+          printf '{"schema_version":1,"name":"%s","version":"%s","language":"rust","metadata":{"commit":"%s","published_by":"wasm-publish run %s"}}' \
+            "$TOOL" "$VERSION" "${{ github.sha }}" "${{ github.run_id }}" > /tmp/tool-manifest.json
+          oras push "ghcr.io/aktoh-cyber/$PREFIX/$TOOL:sha256-${HEX}.manifest" \
+            /tmp/tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json
+          echo "::notice::manifest sidecar pushed for $TOOL@$VERSION (sha256-${HEX}.manifest)"
+
       # B7 (2026-08-19): register the release in the control plane's SHARED catalog
       # registry so ANY tenant can invoke it without a per-tenant synapse.upload_tool
       # row. `tool_release` is per-tenant; forgetting upload_tool used to produce a
