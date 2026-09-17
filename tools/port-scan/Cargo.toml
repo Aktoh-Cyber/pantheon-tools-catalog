@@ -1,0 +1,24 @@
+[package]
+name = "port-scan"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: multi-port TCP scan of one host, explicit list or bounded range (Tier 4, net:direct)."
+
+[[bin]]
+name = "port-scan"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+# Isolated from the catalog's Python/cargo tree; build via
+# cd tools/port-scan && cargo build --release --target wasm32-wasip2
+[workspace]

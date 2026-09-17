@@ -1,0 +1,22 @@
+[package]
+name = "config-lint"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: lint a security config (sshd_config) against a hardening baseline (Tier 0, pure compute)."
+
+[[bin]]
+name = "config-lint"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
