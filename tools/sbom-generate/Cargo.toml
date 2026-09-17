@@ -1,0 +1,22 @@
+[package]
+name = "sbom-generate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: installed-package list -> CycloneDX 1.5 SBOM (Tier 1, pure compute)."
+
+[[bin]]
+name = "sbom-generate"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]

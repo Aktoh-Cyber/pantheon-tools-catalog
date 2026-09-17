@@ -1,0 +1,22 @@
+[package]
+name = "vuln-match"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: match an installed-package list against an advisory feed (Tier 0, pure compute). judge's flagship gap."
+
+[[bin]]
+name = "vuln-match"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]
