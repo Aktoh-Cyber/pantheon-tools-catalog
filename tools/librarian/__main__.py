@@ -42,7 +42,6 @@ from tools.librarian import (
     upsert_node,
 )
 
-
 log = logging.getLogger("librarian-mcp")
 
 
@@ -130,7 +129,7 @@ def _build_server() -> Server:
         _desc, input_model, run_callable = entry
         try:
             parsed = input_model.model_validate(arguments)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return [
                 TextContent(
                     type="text",
@@ -142,7 +141,7 @@ def _build_server() -> Server:
             ]
         try:
             response = await run_callable(parsed)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return [
                 TextContent(
                     type="text",

@@ -11,7 +11,6 @@ from tools._shared.cypher_safety import (
     assert_read_only,
 )
 
-
 # --- Read queries pass --------------------------------------------------------
 
 READ_OK = [

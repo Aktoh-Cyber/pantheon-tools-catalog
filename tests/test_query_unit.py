@@ -20,7 +20,6 @@ from tools.librarian.query import (
     run,
 )
 
-
 # --- write rejection ---------------------------------------------------------
 
 

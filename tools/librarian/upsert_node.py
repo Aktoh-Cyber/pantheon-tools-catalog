@@ -111,7 +111,7 @@ async def run(input: UpsertNodeInput) -> UpsertNodeToolResponse:
             result = await session.run(cypher, params)
             record = await result.single()
             summary = await result.consume()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return UpsertNodeToolResponse(
             ok=False,
             error=f"{type(exc).__name__}: {exc}",

@@ -23,7 +23,7 @@ Graph projection:
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from neo4j.graph import Node, Path, Relationship
 from pydantic import BaseModel, Field
@@ -65,7 +65,7 @@ class GraphData(BaseModel):
 
 class QueryResult(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
-    graph: Optional[GraphData] = None
+    graph: GraphData | None = None
 
 
 class QueryToolResponse(BaseModel):
@@ -95,7 +95,7 @@ async def run(input: QueryInput) -> QueryToolResponse:
         async with driver.session() as session:
             result = await session.run(input.cypher, input.params)
             rows = [dict(record) async for record in result]
-    except Exception as exc:  # noqa: BLE001 — fail loud
+    except Exception as exc:  # fail loud
         return QueryToolResponse(
             ok=False,
             error=f"{type(exc).__name__}: {exc}",
@@ -115,10 +115,10 @@ async def run(input: QueryInput) -> QueryToolResponse:
 def _rows_contain_graph(rows: list[dict[str, Any]]) -> bool:
     for row in rows:
         for value in row.values():
-            if isinstance(value, (Node, Relationship, Path)):
+            if isinstance(value, Node | Relationship | Path):
                 return True
             if isinstance(value, list) and any(
-                isinstance(v, (Node, Relationship, Path)) for v in value
+                isinstance(v, Node | Relationship | Path) for v in value
             ):
                 return True
     return False
