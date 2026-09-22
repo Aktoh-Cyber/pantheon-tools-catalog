@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, Field
 
@@ -43,10 +43,14 @@ from tools.librarian.query import (
 from tools.librarian.schema import SchemaInput
 from tools.librarian.schema import run as run_schema
 
+
 # Type for an LLM call: takes a system prompt + user prompt + a JSON
 # schema, returns the parsed JSON dict. Async so the tool's `run`
 # can `await` it.
-LLMCall = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+class LLMCall(Protocol):
+    async def __call__(
+        self, system: str, user: str, output_schema: dict[str, Any]
+    ) -> dict[str, Any]: ...
 
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -94,7 +98,7 @@ def _default_llm_call() -> LLMCall:
     ) -> dict[str, Any]:
         # Lazy import; the SDK is in the catalog's runtime deps but
         # not the test deps.
-        from anthropic import AsyncAnthropic  # type: ignore[import-not-found]
+        from anthropic import AsyncAnthropic
 
         client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         resp = await client.messages.create(
@@ -280,4 +284,4 @@ def _parse_json_or_raise(text: str) -> dict[str, Any]:
         if s.endswith("```"):
             s = s[:-3]
         s = s.strip()
-    return json.loads(s)
+    return cast(dict[str, Any], json.loads(s))
