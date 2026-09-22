@@ -1,0 +1,14 @@
+# fs-hash capability declaration.
+# Consumed by .github/workflows/{wasm-publish,manifest-backfill}.yml to build the
+# ToolManifest sidecar's declared_capabilities (synapse #185/#190). Schema matches
+# synapse-proto/src/manifest/tool_toml.rs. Caps cross-checked against tools/fs-hash/src
+# (+ wit/ host imports where present); the tool source is the source of truth.
+[tool]
+name = "fs-hash"
+version = "0.1.1"
+language = "rust"
+
+[tool.capabilities]
+network_mode = "none"
+mounts = []
+host_apis = []

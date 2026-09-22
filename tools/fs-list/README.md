@@ -9,11 +9,15 @@ executor passes lease `args` as a single JSON-encoded CLI argument.
 
 ```json
 {
-  "path": "/etc",
+  "path": "/work",
   "max_entries": 100,        // optional, default 100
   "include_hidden": false    // optional, default false
 }
 ```
+
+> **Sandbox visibility:** the wasip2 sandbox only exposes `/work` plus the paths
+> the lease declares as `mounts`. Listing a host path like `/etc` requires the lease
+> to mount it (e.g. `mounts: ["/etc"]`); without that the tool errors on `read_dir`.
 
 ## Output (stdout, single line)
 

@@ -186,10 +186,19 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$REF" >/dev/null
 
-      # Manifests-over-proxy (2026-09-01, synapse #157): publish the tool-manifest
-      # sidecar synapse-side admission reads for tier/language. Without it EVERY
-      # admission logs `tier=unknown` — no catalog tool had ever shipped one.
-      # Sidecar tag derivation must match synapse-oci's `sidecar_reference`:
+      # Manifests-over-proxy (2026-09-01, synapse #157) + declared_capabilities
+      # (2026-09-21, synapse #185/#190, issue #37): publish the tool-manifest
+      # sidecar the CP serves at GET /v2/catalog/manifests/:digest. Without a
+      # sidecar EVERY admission logs `tier=unknown`; without declared_capabilities
+      # in it, a lease's network_mode/mounts/host_apis had to be re-uploaded per
+      # tenant (spec_toml). The sidecar now carries BOTH, built from the tool's
+      # checked-in tools/<tool>/tool.toml, so since synapse #185 the CP defaults
+      # every tenant's lease caps from it with zero per-tenant uploads.
+      #
+      # The JSON shape is a byte-for-byte match for synapse-proto's ToolManifest
+      # (synapse-proto/src/manifest/{mod,tool_toml}.rs::from_tool_toml), so the
+      # node/CP `serde_json::from_slice::<ToolManifest>` parses it. Sidecar tag
+      # derivation still matches synapse-oci's `sidecar_reference`:
       # `sha256-<OCI-manifest-digest-hex>.manifest` on the same repo. Advisory
       # metadata (never executed); not cosign-signed, same as the .sig layout
       # convention it rides beside.
@@ -201,14 +210,25 @@ jobs:
           PREFIX="${{ steps.resolve.outputs.prefix }}"
           OCI_DIGEST="${{ steps.push.outputs.oci_digest }}"
           HEX="${OCI_DIGEST#sha256:}"
-          # Language: every catalog tool today is Rust on wasm32-wasip2 (GA
-          # tier). If a preview-language tool (python/typescript) ever lands,
-          # read it from the tool's own metadata instead of this constant.
-          printf '{"schema_version":1,"name":"%s","version":"%s","language":"rust","metadata":{"commit":"%s","published_by":"wasm-publish run %s"}}' \
-            "$TOOL" "$VERSION" "${{ github.sha }}" "${{ github.run_id }}" > tool-manifest.json
+          if [ ! -f "tools/$TOOL/tool.toml" ]; then
+            echo "ERROR: tools/$TOOL/tool.toml is missing — every publishable tool must declare its capabilities (see tools/_shared/tool_manifest.py)" >&2
+            exit 1
+          fi
+          # Build the REAL manifest (schema_version/name/version/language/entry +
+          # declared_capabilities + metadata) from the tool's tool.toml. python3
+          # is preinstalled on ubuntu-latest (>= 3.11 for tomllib). The converter
+          # validates host_apis against the known synapse-host set and fails loud;
+          # --expect-name/--expect-version abort if the checked-in tool.toml has
+          # drifted from the tag being published.
+          python3 tools/_shared/tool_manifest.py \
+            --tool-toml "tools/$TOOL/tool.toml" \
+            --expect-name "$TOOL" \
+            --expect-version "$VERSION" \
+            --metadata "$(printf '{"commit":"%s","published_by":"wasm-publish run %s"}' "${{ github.sha }}" "${{ github.run_id }}")" \
+            > tool-manifest.json
           oras push "ghcr.io/aktoh-cyber/$PREFIX/$TOOL:sha256-${HEX}.manifest" \
             tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json
-          echo "::notice::manifest sidecar pushed for $TOOL@$VERSION (sha256-${HEX}.manifest)"
+          echo "::notice::manifest sidecar (with declared_capabilities) pushed for $TOOL@$VERSION (sha256-${HEX}.manifest)"
 
       # B7 (2026-08-19): register the release in the control plane's SHARED catalog
       # registry so ANY tenant can invoke it without a per-tenant synapse.upload_tool

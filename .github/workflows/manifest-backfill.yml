@@ -8,11 +8,14 @@
 # rebuilding anything (a rebuild could change the WASM digest and churn
 # `catalog_release`).
 #
-# For each `<tool>-v<version>` git tag (the publish trigger convention):
+# For each published tool (version resolved from ghcr's own tag list):
 #   1. resolve the OCI manifest digest of ghcr…/<tool>:<version>
-#   2. skip if `sha256-<hex>.manifest` already exists
-#   3. push a minimal ToolManifest JSON as the sidecar (advisory
-#      metadata; language=rust — the whole catalog is Rust/wasip2 today)
+#   2. skip if `sha256-<hex>.manifest` already exists (unless `force`)
+#   3. push the tool's REAL ToolManifest as the sidecar, with
+#      declared_capabilities built from its checked-in tools/<tool>/tool.toml
+#      (2026-09-21, synapse #185/#190, issue #37 — the sidecars this workflow
+#      first shipped were capability-less stubs; run with `force: true` to
+#      REPLACE those stubs in place, no rebuild, no WASM digest churn).
 name: manifest-backfill
 
 on:
@@ -20,6 +23,10 @@ on:
     inputs:
       dry_run:
         description: "List what would be pushed without pushing"
+        type: boolean
+        default: false
+      force:
+        description: "Overwrite sidecars that already exist (needed to replace pre-#37 stubs)"
         type: boolean
         default: false
 
@@ -50,6 +57,7 @@ jobs:
       - name: Backfill manifest sidecars
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
         run: |
           set -euo pipefail
           PREFIX="ghcr.io/aktoh-cyber/pantheon-tools-catalog"
@@ -75,19 +83,34 @@ jobs:
             fi
             HEX="${OCI_DIGEST#sha256:}"
             SIDECAR="$PREFIX/$TOOL:sha256-${HEX}.manifest"
-            if oras resolve "$SIDECAR" >/dev/null 2>&1; then
-              echo "$TOOL@$VERSION: sidecar already present — skipping"
+            if [ "$FORCE" != "true" ] && oras resolve "$SIDECAR" >/dev/null 2>&1; then
+              echo "$TOOL@$VERSION: sidecar already present — skipping (run with force:true to replace a pre-#37 stub)"
               skipped=$((skipped+1)); continue
             fi
+            # declared_capabilities (2026-09-21, synapse #185/#190, issue #37):
+            # backfill a REAL manifest (with the tool's declared_capabilities)
+            # from its checked-in tool.toml, NOT the old stub. This is the
+            # digest-safe path for already-published tools — it reads the live
+            # OCI digest and never rebuilds, so no WASM digest churns. A tool with
+            # a ghcr version but no tool.toml can't be given caps: warn + skip.
+            if [ ! -f "tools/$TOOL/tool.toml" ]; then
+              echo "::warning::$TOOL@$VERSION: no tools/$TOOL/tool.toml — cannot backfill declared_capabilities, skipping"
+              missing=$((missing+1)); continue
+            fi
             if [ "$DRY_RUN" = "true" ]; then
-              echo "DRY RUN: would push $SIDECAR"
+              echo "DRY RUN: would push $SIDECAR (declared_capabilities from tools/$TOOL/tool.toml)"
               pushed=$((pushed+1)); continue
             fi
-            printf '{"schema_version":1,"name":"%s","version":"%s","language":"rust","metadata":{"backfilled_by":"manifest-backfill run %s"}}' \
-              "$TOOL" "$VERSION" "${{ github.run_id }}" > tool-manifest.json
+            # python3 is preinstalled on ubuntu-latest (>= 3.11 for tomllib). The
+            # converter validates host_apis + fails loud on a malformed tool.toml.
+            python3 tools/_shared/tool_manifest.py \
+              --tool-toml "tools/$TOOL/tool.toml" \
+              --expect-name "$TOOL" \
+              --metadata "$(printf '{"backfilled_by":"manifest-backfill run %s"}' "${{ github.run_id }}")" \
+              > tool-manifest.json
             oras push "$SIDECAR" \
               tool-manifest.json:application/vnd.aktoh.synapse.tool-manifest.v1+json >/dev/null
-            echo "$TOOL@$VERSION: sidecar pushed ($SIDECAR)"
+            echo "$TOOL@$VERSION: sidecar (with declared_capabilities) pushed ($SIDECAR)"
             pushed=$((pushed+1))
           done
           echo "## Backfill: pushed=$pushed skipped=$skipped missing=$missing" | tee -a "$GITHUB_STEP_SUMMARY"
