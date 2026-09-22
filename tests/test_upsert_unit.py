@@ -17,15 +17,18 @@ from tools._shared.provenance import (
 from tools.librarian.upsert_edge import (
     EdgeEndpoint,
     UpsertEdgeInput,
+)
+from tools.librarian.upsert_edge import (
     _build_cypher as _build_edge_cypher,
 )
 from tools.librarian.upsert_edge import run as run_edge
 from tools.librarian.upsert_node import (
     UpsertNodeInput,
+)
+from tools.librarian.upsert_node import (
     _build_cypher as _build_node_cypher,
 )
 from tools.librarian.upsert_node import run as run_node
-
 
 # ---------------------------------------------------------------------------
 # Shared provenance helper
@@ -33,11 +36,11 @@ from tools.librarian.upsert_node import run as run_node
 
 
 def test_reserved_provenance_keys_set():
-    assert RESERVED_PROVENANCE_KEYS == {
+    assert {
         "commissioned_by",
         "commissioned_at",
         "session_id",
-    }
+    } == RESERVED_PROVENANCE_KEYS
 
 
 def test_assert_no_reserved_keys_passes_on_clean_props():

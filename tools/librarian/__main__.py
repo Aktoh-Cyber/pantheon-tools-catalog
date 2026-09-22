@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mcp.server import Server  # type: ignore[import-not-found]
-from mcp.server.stdio import stdio_server  # type: ignore[import-not-found]
-from mcp.types import TextContent, Tool  # type: ignore[import-not-found]
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
+from pydantic import BaseModel
 
 from tools.librarian import (
     explain,
@@ -42,7 +44,6 @@ from tools.librarian import (
     upsert_node,
 )
 
-
 log = logging.getLogger("librarian-mcp")
 
 
@@ -50,7 +51,8 @@ log = logging.getLogger("librarian-mcp")
 
 # Map MCP tool name → (description, pydantic input model, run callable).
 # The MCP server exposes each entry as a tool with its JSON Schema.
-_TOOLS = {
+_ToolEntry = tuple[str, type[BaseModel], Callable[..., Awaitable[Any]]]
+_TOOLS: dict[str, _ToolEntry] = {
     "librarian.schema": (
         "Return the shape of the per-tenant Neo4j: node_labels, "
         "relationship_types, property_keys.",
@@ -100,7 +102,9 @@ _TOOLS = {
 def _build_server() -> Server:
     server = Server("pantheon-librarian-tools")
 
-    @server.list_tools()
+    # mcp's Server.list_tools()/call_tool() return untyped decorators
+    # (upstream typing gap); silence the strict untyped-decorator errors.
+    @server.list_tools()  # type: ignore[no-untyped-call, misc]
     async def _list_tools() -> list[Tool]:
         return [
             Tool(
@@ -111,7 +115,7 @@ def _build_server() -> Server:
             for name, (desc, model, _) in _TOOLS.items()
         ]
 
-    @server.call_tool()
+    @server.call_tool()  # type: ignore[misc]
     async def _call_tool(
         name: str, arguments: dict[str, Any]
     ) -> list[TextContent]:
@@ -130,7 +134,7 @@ def _build_server() -> Server:
         _desc, input_model, run_callable = entry
         try:
             parsed = input_model.model_validate(arguments)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return [
                 TextContent(
                     type="text",
@@ -142,7 +146,7 @@ def _build_server() -> Server:
             ]
         try:
             response = await run_callable(parsed)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return [
                 TextContent(
                     type="text",

@@ -13,15 +13,21 @@ from __future__ import annotations
 
 import pytest
 
-from tools.librarian.query import QueryInput, run as run_query
-from tools.librarian.schema import SchemaInput, run as run_schema
+from tools.librarian.query import QueryInput
+from tools.librarian.query import run as run_query
+from tools.librarian.schema import SchemaInput
+from tools.librarian.schema import run as run_schema
 from tools.librarian.upsert_edge import (
     EdgeEndpoint,
     UpsertEdgeInput,
+)
+from tools.librarian.upsert_edge import (
     run as run_upsert_edge,
 )
 from tools.librarian.upsert_node import (
     UpsertNodeInput,
+)
+from tools.librarian.upsert_node import (
     run as run_upsert_node,
 )
 
@@ -348,7 +354,7 @@ async def test_query_projects_graph_when_path_returned(neo4j_clean) -> None:
     # GraphData populated.
     assert resp.result.graph is not None
     node_labels = sorted(
-        l for n in resp.result.graph.nodes for l in n.labels
+        label for n in resp.result.graph.nodes for label in n.labels
     )
     assert "Host" in node_labels
     assert "Service" in node_labels
@@ -379,6 +385,8 @@ async def test_query_write_rejected_at_tool_layer(neo4j_clean) -> None:
 
 from tools.librarian.purge_session import (  # noqa: E402
     PurgeSessionInput,
+)
+from tools.librarian.purge_session import (  # noqa: E402
     run as run_purge,
 )
 
@@ -388,7 +396,7 @@ async def test_purge_session_deletes_session_nodes_only(neo4j_clean) -> None:
     inv-purge; assert only the keep set remains."""
     # session inv-purge: 3 Host nodes
     for ip in ("10.0.0.1", "10.0.0.2", "10.0.0.3"):
-        resp = await run_node(
+        resp = await run_upsert_node(
             UpsertNodeInput(
                 label="Host", merge_keys=["ip"],
                 props={"ip": ip},
@@ -399,7 +407,7 @@ async def test_purge_session_deletes_session_nodes_only(neo4j_clean) -> None:
 
     # session inv-keep: 2 Host nodes
     for ip in ("10.0.1.1", "10.0.1.2"):
-        resp = await run_node(
+        resp = await run_upsert_node(
             UpsertNodeInput(
                 label="Host", merge_keys=["ip"],
                 props={"ip": ip},
@@ -444,14 +452,14 @@ async def test_purge_session_deletes_session_nodes_only(neo4j_clean) -> None:
 async def test_purge_session_drops_incident_relationships(neo4j_clean) -> None:
     """DETACH DELETE must drop relationships incident on purged nodes."""
     # Create Host + Service nodes for session inv-rel.
-    await run_node(
+    await run_upsert_node(
         UpsertNodeInput(
             label="Host", merge_keys=["ip"],
             props={"ip": "10.9.9.9"},
             commissioned_by="infosec", session_id="inv-rel",
         )
     )
-    await run_node(
+    await run_upsert_node(
         UpsertNodeInput(
             label="Service", merge_keys=["port"],
             props={"port": 8443},
@@ -459,7 +467,7 @@ async def test_purge_session_drops_incident_relationships(neo4j_clean) -> None:
         )
     )
     # Create RUNS edge between them.
-    await run_edge(
+    await run_upsert_edge(
         UpsertEdgeInput(
             rel_type="RUNS",
             **{

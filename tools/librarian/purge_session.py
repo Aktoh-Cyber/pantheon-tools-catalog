@@ -108,7 +108,7 @@ async def run(input: PurgeSessionInput) -> PurgeSessionToolResponse:
         async with driver.session() as session:
             result = await session.run(cypher, params)
             summary = await result.consume()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return PurgeSessionToolResponse(
             ok=False,
             error=f"{type(exc).__name__}: {exc}",

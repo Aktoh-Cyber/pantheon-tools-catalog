@@ -17,12 +17,11 @@ import pytest
 import tools.librarian.explain as explain_mod
 from tools.librarian.explain import (
     ExplainInput,
+    _parse_json_or_raise,
     reset_llm_factory_for_testing,
     run,
     set_llm_factory,
-    _parse_json_or_raise,
 )
-
 
 # --- fixtures ---------------------------------------------------------------
 

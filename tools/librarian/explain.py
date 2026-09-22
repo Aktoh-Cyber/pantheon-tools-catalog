@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, Field
 
@@ -35,17 +36,21 @@ from tools._shared.cypher_safety import (
 from tools._shared.neo4j_client import get_driver
 from tools.librarian.query import (
     GraphData,
-    QueryResult,
     _project_graph,
     _rows_contain_graph,
     _serialize_rows,
 )
-from tools.librarian.schema import SchemaInput, run as run_schema
+from tools.librarian.schema import SchemaInput
+from tools.librarian.schema import run as run_schema
+
 
 # Type for an LLM call: takes a system prompt + user prompt + a JSON
 # schema, returns the parsed JSON dict. Async so the tool's `run`
 # can `await` it.
-LLMCall = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+class LLMCall(Protocol):
+    async def __call__(
+        self, system: str, user: str, output_schema: dict[str, Any]
+    ) -> dict[str, Any]: ...
 
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -93,7 +98,7 @@ def _default_llm_call() -> LLMCall:
     ) -> dict[str, Any]:
         # Lazy import; the SDK is in the catalog's runtime deps but
         # not the test deps.
-        from anthropic import AsyncAnthropic  # type: ignore[import-not-found]
+        from anthropic import AsyncAnthropic
 
         client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
         resp = await client.messages.create(
@@ -166,7 +171,7 @@ async def run(input: ExplainInput) -> ExplainToolResponse:
     """Two-pass NL→Cypher with optional read-only execute."""
     try:
         schema_payload = await _fetch_schema()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return ExplainToolResponse(
             ok=False,
             error=f"schema fetch failed: {type(exc).__name__}: {exc}",
@@ -189,7 +194,7 @@ async def run(input: ExplainInput) -> ExplainToolResponse:
             output_schema=ExplainCandidate.model_json_schema(),
         )
         candidate = ExplainCandidate.model_validate(raw)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return ExplainToolResponse(
             ok=False,
             error=f"LLM call failed: {type(exc).__name__}: {exc}",
@@ -223,7 +228,7 @@ async def run(input: ExplainInput) -> ExplainToolResponse:
         async with driver.session() as session:
             result = await session.run(candidate.cypher)
             rows = [dict(record) async for record in result]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return ExplainToolResponse(
             ok=False,
             error=f"executing candidate Cypher failed: "
@@ -279,4 +284,4 @@ def _parse_json_or_raise(text: str) -> dict[str, Any]:
         if s.endswith("```"):
             s = s[:-3]
         s = s.strip()
-    return json.loads(s)
+    return cast(dict[str, Any], json.loads(s))

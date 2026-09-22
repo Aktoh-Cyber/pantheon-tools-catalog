@@ -30,7 +30,10 @@ from pydantic import BaseModel, Field
 from tools._shared.neo4j_client import get_driver
 
 _LABELS_CYPHER = "CALL db.labels() YIELD label RETURN label"
-_REL_TYPES_CYPHER = "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+_REL_TYPES_CYPHER = (
+    "CALL db.relationshipTypes() YIELD relationshipType "
+    "RETURN relationshipType"
+)
 _PROP_KEYS_CYPHER = "CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey"
 
 
@@ -82,7 +85,7 @@ async def run(_: SchemaInput | None = None) -> SchemaToolResponse:
                 property_keys=sorted(prop_keys),
             ),
         )
-    except Exception as exc:  # noqa: BLE001 — fail loud, surface root cause
+    except Exception as exc:  # fail loud, surface root cause
         return SchemaToolResponse(
             ok=False,
             error=f"{type(exc).__name__}: {exc}",

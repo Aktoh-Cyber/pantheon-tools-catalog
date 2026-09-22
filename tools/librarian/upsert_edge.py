@@ -126,7 +126,7 @@ async def run(input: UpsertEdgeInput) -> UpsertEdgeToolResponse:
             result = await session.run(cypher, params)
             record = await result.single()
             summary = await result.consume()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return UpsertEdgeToolResponse(
             ok=False,
             error=f"{type(exc).__name__}: {exc}",

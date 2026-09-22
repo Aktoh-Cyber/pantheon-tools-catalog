@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Optional
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 _DEFAULT_BOLT_URL = "bolt://localhost:7687"
 
-_driver: Optional[AsyncDriver] = None
+_driver: AsyncDriver | None = None
 _lock = threading.Lock()
 
 
@@ -29,10 +28,7 @@ def _build_driver() -> AsyncDriver:
     url = os.environ.get("NEO4J_BOLT_URL", _DEFAULT_BOLT_URL)
     user = os.environ.get("NEO4J_USER", "")
     password = os.environ.get("NEO4J_PASSWORD", "")
-    if user and password:
-        auth = (user, password)
-    else:
-        auth = None
+    auth = (user, password) if user and password else None
     # max_connection_lifetime defaults to 1h which is fine for
     # localhost; max_connection_pool_size defaults to 100 which
     # is generous for a single sidecar.
