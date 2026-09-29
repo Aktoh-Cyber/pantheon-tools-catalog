@@ -38,6 +38,13 @@ declares the grant, so `capabilities` can be left empty on invoke.
 - `owner_unknown`: sockets whose owner the node could not read (for example a
   non-root node looking at another user's process on Linux).
 
+Output stays under the node's 64 KiB stdout capture (0.1.1). When a host has
+too much to report, the tool drops per-connection rows first (counts and
+`remote_peers` stay, `connections_omitted: true`), then surplus peers
+(`remote_peers_truncated`), then ephemeral-port services
+(`ephemeral_services_omitted`), then services (`services_truncated`). It says
+what it dropped and never silently. 0.1.0 trapped with no output on a busy laptop.
+
 Exit 0 when evaluated. Exit 1 with `error` for bad args, a lease that does not
 grant the host API (`denied: true`), or a host that cannot list sockets.
 

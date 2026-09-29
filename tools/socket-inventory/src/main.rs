@@ -29,7 +29,11 @@ use std::process::ExitCode;
 wit_bindgen::generate!({ path: "wit", world: "socket-inventory", generate_all });
 use synapse::host::process::{self, OwnedSocket, ProcError};
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = "0.1.1";
+/// The node captures at most 64 KiB of a tool's stdout; a longer write fails,
+/// and a failed `println!` panics into a wasm trap with no output at all
+/// (0.1.0 on a busy macOS laptop). Stay well under it.
+const OUTPUT_BUDGET: usize = 56 * 1024;
 const HOST_API: &str = "process.list-owned-sockets";
 const EPHEMERAL_FLOOR: u16 = 32768;
 
@@ -219,14 +223,68 @@ fn run() -> Result<serde_json::Value, serde_json::Value> {
     Ok(out)
 }
 
+/// Shrink the result until it fits the node's stdout capture, dropping the
+/// least useful detail first and saying so: per-connection rows (the counts and
+/// `remote_peers` stay), then peers beyond what fits, then ephemeral-port
+/// services, then any remaining services. Never silently.
+fn fit_budget(mut v: serde_json::Value) -> serde_json::Value {
+    let size = |v: &serde_json::Value| v.to_string().len();
+    if size(&v) <= OUTPUT_BUDGET {
+        return v;
+    }
+    if v.get("connections").is_some() {
+        v["connections"] = serde_json::json!([]);
+        v["connections_omitted"] = true.into();
+        v["connections_truncated"] = true.into();
+    }
+    while size(&v) > OUTPUT_BUDGET {
+        let peers = v["remote_peers"].as_array().map(|a| a.len()).unwrap_or(0);
+        if peers == 0 {
+            break;
+        }
+        let keep = peers / 2;
+        if let Some(a) = v["remote_peers"].as_array_mut() {
+            a.truncate(keep);
+        }
+        v["remote_peers_truncated"] = true.into();
+    }
+    if size(&v) > OUTPUT_BUDGET {
+        if let Some(a) = v["services"].as_array_mut() {
+            let before = a.len();
+            a.retain(|s| !s["ephemeral_port"].as_bool().unwrap_or(false));
+            let dropped = before - a.len();
+            v["ephemeral_services_omitted"] = dropped.into();
+        }
+    }
+    while size(&v) > OUTPUT_BUDGET {
+        let n = v["services"].as_array().map(|a| a.len()).unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        if let Some(a) = v["services"].as_array_mut() {
+            a.truncate(n * 3 / 4);
+        }
+        v["services_truncated"] = true.into();
+    }
+    v
+}
+
+/// Print one JSON line without panicking if stdout refuses the write.
+fn emit(v: &serde_json::Value) {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{v}");
+    let _ = out.flush();
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(v) => {
-            println!("{v}");
+            emit(&fit_budget(v));
             ExitCode::SUCCESS
         }
         Err(v) => {
-            println!("{v}");
+            emit(&v);
             ExitCode::from(1)
         }
     }

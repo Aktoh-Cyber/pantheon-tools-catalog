@@ -5,7 +5,7 @@
 # (+ wit/ host imports where present); the tool source is the source of truth.
 [tool]
 name = "socket-inventory"
-version = "0.1.0"
+version = "0.1.1"
 language = "rust"
 
 [tool.capabilities]
