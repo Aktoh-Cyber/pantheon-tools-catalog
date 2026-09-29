@@ -1,0 +1,23 @@
+[package]
+name = "socket-inventory"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Synapse v2 tool: listening-socket / service inventory with owning process, optional established peers (Tier 1, host.process.list-owned-sockets; read-only, sandbox stays net:none)."
+
+[[bin]]
+name = "socket-inventory"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+wit-bindgen = "0.41"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+
+[workspace]

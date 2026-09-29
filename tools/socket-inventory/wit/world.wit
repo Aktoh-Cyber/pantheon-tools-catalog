@@ -1,0 +1,5 @@
+package pantheon:tools;
+
+world socket-inventory {
+    import synapse:host/process@0.1.0;
+}

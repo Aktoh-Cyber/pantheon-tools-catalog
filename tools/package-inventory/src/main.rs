@@ -1,8 +1,13 @@
 //! Synapse v2 tool — `package-inventory` (Tier 1). Full installed-package list via
-//! the M11 provider `inventory.list-installed` (dpkg/rpm/apk/brew/winget). SBOM seed.
-//! Lease must grant `host_apis: ["inventory.list-installed"]`; when denied the
-//! provider returns an EMPTY list (read-only ops don't error) — indistinguishable
-//! from "no back-end", so we report `granted:"unknown-if-empty"` honestly.
+//! the M11 provider `inventory.list-installed` (dpkg/rpm/apk/brew/winget/registry).
+//! SBOM seed. Lease must grant `host_apis: ["inventory.list-installed"]`.
+//!
+//! 0.2.0 (synapse #189c, needs synapse-node >= 0.1.17): a denied lease and a host
+//! with no package back-end both make `list-installed` return an EMPTY list. When
+//! the list is empty the tool now asks `inventory-status` and reports which it
+//! was (`status`: `denied` | `no-backend` | `ready:<backend>`), instead of the
+//! 0.1.0 "either not granted or no back-end" guess. A non-empty list is proof
+//! of both, so `inventory-status` is not called then.
 //! Args: { "max": <int, default 2000>, "name_prefix": "<optional filter>" }
 //! ExitCode contract: never std::process::exit.
 use std::process::ExitCode;
@@ -31,12 +36,32 @@ fn run() -> Result<serde_json::Value, serde_json::Value> {
     let truncated = pkgs.len() > max;
     if truncated { pkgs.truncate(max); }
 
+    // Empty list: say WHY (denied vs no back-end vs a back-end that listed nothing).
+    let (status, note) = if total == 0 {
+        match inventory::inventory_status() {
+            inventory::BackendStatus::Denied => (
+                "denied".to_string(),
+                "empty: the lease does not grant inventory.list-installed (not granted)".to_string(),
+            ),
+            inventory::BackendStatus::NoBackend => (
+                "no-backend".to_string(),
+                "empty: no package back-end in the node's context (not a clean host: the node cannot see a package manager)".to_string(),
+            ),
+            inventory::BackendStatus::Ready(b) => (
+                format!("ready:{b}"),
+                format!("empty: back-end {b} is available but listed no packages"),
+            ),
+        }
+    } else {
+        ("ok".to_string(), String::new())
+    };
+
     Ok(serde_json::json!({
         "tool": "package-inventory",
+        "version": "0.2.0",
         "host_api": "inventory.list-installed",
-        // read-only denial returns [] — a caller can't distinguish denied vs no back-end
-        // from the payload alone; the audit trail's host_api_call.decision is authoritative.
-        "note": if total == 0 { "empty: either host_apis not granted or no package back-end detected — check audit host_api_call.decision" } else { "" },
+        "status": status,
+        "note": note,
         "total_installed": total,
         "matched": matched,
         "truncated": truncated,

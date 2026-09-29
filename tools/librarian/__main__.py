@@ -9,7 +9,8 @@ Pantheon's per-profile config.yaml registers this in the
 `librarian.*` tool calls through it.
 
 Each tool (schema, query, explain, upsert_node, upsert_edge,
-purge_session, apply_pending) is registered with its pydantic input schema; the
+purge_session, apply_pending, and since v0.3.0 ingest_inventory and the
+enrichers) is registered with its pydantic input schema; the
 server validates the input against the schema, calls the tool's
 `run()`, and returns the response as a JSON-serializable dict.
 
@@ -23,6 +24,7 @@ pydantic-shaped `run()` functions and the MCP wire format. The
 tool implementations stay framework-agnostic; the MCP framework
 is only imported in this module.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +41,13 @@ from tools._shared import write_journal
 from tools._shared.json_safe import to_json_safe
 from tools.librarian import (
     apply_pending,
+    collect_inventory,
+    enrich_all,
+    enrich_eol,
+    enrich_vulnerabilities,
     explain,
+    ingest_inventory,
+    match_iocs,
     purge_session,
     query,
     schema,
@@ -98,6 +106,62 @@ _TOOLS: dict[str, _ToolEntry] = {
         apply_pending.ApplyPendingInput,
         apply_pending.run,
     ),
+    "librarian.collect_inventory": (
+        "Sweep step 1: pull each connected node's inventory straight from "
+        "Synapse into the graph (os-fingerprint -> Host OS facts, "
+        "package-inventory -> Package/HAS_PACKAGE, socket-inventory -> "
+        "Service/LISTENS_ON + remote_peers). No output passes through a "
+        "reply, so nothing is truncated. Read-only tools only. Then run "
+        "librarian.enrich_all.",
+        collect_inventory.CollectInventoryInput,
+        collect_inventory.run,
+    ),
+    "librarian.ingest_inventory": (
+        "Record a node tool's inventory for one Host in ONE call: pass the "
+        "Synapse tool's result.inline_output unchanged. tool=package-inventory "
+        "-> Package nodes + HAS_PACKAGE (packages no longer listed are "
+        "unlinked); tool=socket-inventory -> Service nodes + LISTENS_ON "
+        "(services no longer listening are removed) and the host's public "
+        "remote_peers. The Host (merge key node_id) must exist. Use this "
+        "instead of one upsert per package or port.",
+        ingest_inventory.IngestInventoryInput,
+        ingest_inventory.run,
+    ),
+    "librarian.enrich_all": (
+        "Sweep step 2, after EVERY sweep commission: enrich_vulnerabilities "
+        "(OSV), enrich_eol (endoflife.date) and match_iocs (abuse.ch), in "
+        "that order. collect=true runs librarian.collect_inventory first, "
+        "so one call does the whole sweep. Reports each step's counts; ok "
+        "only when every step succeeded.",
+        enrich_all.EnrichAllInput,
+        enrich_all.run,
+    ),
+    "librarian.enrich_vulnerabilities": (
+        "Match every Host's packages against OSV (osv.dev). Writes "
+        "Vulnerability nodes (id, CVEs, severity, CVSS, summary) and "
+        "Package-[:AFFECTED_BY {fixed_version, fix_available}]->Vulnerability; "
+        "rolls counts up onto Package and Host. Debian/Ubuntu apt packages "
+        "are checked (binary->source mapped); Homebrew and Windows packages "
+        "are reported unsupported, never guessed.",
+        enrich_vulnerabilities.EnrichVulnerabilitiesInput,
+        enrich_vulnerabilities.run,
+    ),
+    "librarian.enrich_eol": (
+        "End-of-life status from endoflife.date for each Host's OS release "
+        "and for runtimes among its packages (python, nodejs, openssl, perl, "
+        "...). Sets eol_* properties on Host and Package and a Finding "
+        "(tool eol) per end-of-life item.",
+        enrich_eol.EnrichEolInput,
+        enrich_eol.run,
+    ),
+    "librarian.match_iocs": (
+        "Match observed IPs/domains/hashes in the graph (e.g. a Host's "
+        "remote_peers) against abuse.ch threat intel (ThreatFox, Feodo). "
+        "A match writes an Indicator, MATCHES_IOC, and a high-severity "
+        "Finding. Reports feeds that need an API key.",
+        match_iocs.MatchIocsInput,
+        match_iocs.run,
+    ),
     "librarian.purge_session": (
         "DETACH DELETE every node carrying session_id == <input>. "
         "AgentService-only via Cedar LibrarianPurge. Requires "
@@ -128,9 +192,7 @@ def _build_server() -> Server:
         ]
 
     @server.call_tool()  # type: ignore[misc]
-    async def _call_tool(
-        name: str, arguments: dict[str, Any]
-    ) -> list[TextContent]:
+    async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         entry = _TOOLS.get(name)
         if entry is None:
             return [
@@ -138,8 +200,8 @@ def _build_server() -> Server:
                     type="text",
                     text=(
                         '{"ok": false, "error": "unknown tool: '
-                        f'{name}\", "details": {{"available": '
-                        f'{sorted(_TOOLS)}}}}}'
+                        f'{name}", "details": {{"available": '
+                        f"{sorted(_TOOLS)}}}}}"
                     ),
                 )
             ]

@@ -32,4 +32,24 @@ interface inventory {
 
     /// Report the host OS family + version + arch.
     os-info: func() -> host-os;
+
+    /// What `list-installed` would do under this lease, without enumerating
+    /// anything (#189). An empty `list-installed` cannot tell a lease that does
+    /// not grant `inventory.list-installed` apart from a host with no package
+    /// back-end in the node's context; this can.
+    /// (WIT forbids a type and a function sharing a name, so the variant is
+    /// `backend-status` and the function `inventory-status`.)
+    variant backend-status {
+        /// The lease does not grant `inventory.list-installed`.
+        denied,
+        /// No supported package back-end is visible to the node.
+        no-backend,
+        /// A back-end would answer. The payload names it: `apt`, `dnf`, `yum`,
+        /// `apk`, `brew`, `winget`, or `registry` (Windows Uninstall keys).
+        ready(string),
+    }
+
+    /// Cheap: gated on `inventory.list-installed` and audited like it, but
+    /// never enumerates packages.
+    inventory-status: func() -> backend-status;
 }

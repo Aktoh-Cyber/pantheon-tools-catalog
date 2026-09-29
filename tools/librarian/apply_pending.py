@@ -21,13 +21,31 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from tools._shared import write_journal
-from tools.librarian import purge_session, upsert_edge, upsert_node
+from tools.librarian import (
+    enrich_eol,
+    enrich_vulnerabilities,
+    ingest_inventory,
+    match_iocs,
+    purge_session,
+    upsert_edge,
+    upsert_node,
+)
 
 _Replay = tuple[type[BaseModel], Callable[[Any], Awaitable[Any]]]
 _REPLAYERS: dict[str, _Replay] = {
     "librarian.upsert_node": (upsert_node.UpsertNodeInput, upsert_node.run),
     "librarian.upsert_edge": (upsert_edge.UpsertEdgeInput, upsert_edge.run),
     "librarian.purge_session": (purge_session.PurgeSessionInput, purge_session.run),
+    "librarian.ingest_inventory": (
+        ingest_inventory.IngestInventoryInput,
+        ingest_inventory.run,
+    ),
+    "librarian.enrich_vulnerabilities": (
+        enrich_vulnerabilities.EnrichVulnerabilitiesInput,
+        enrich_vulnerabilities.run,
+    ),
+    "librarian.enrich_eol": (enrich_eol.EnrichEolInput, enrich_eol.run),
+    "librarian.match_iocs": (match_iocs.MatchIocsInput, match_iocs.run),
 }
 
 

@@ -21,6 +21,9 @@ the librarian persona's knowledge-graph surface.
 | `librarian.explain`        | librarian | Natural language → Cypher (optional pass-through execute).             |
 | `librarian.upsert_node`    | librarian | AgentService-only `MERGE`-based node upsert.                           |
 | `librarian.upsert_edge`    | librarian | AgentService-only `MERGE`-based relationship upsert.                   |
+| `librarian.collect_inventory` | librarian | Pull every node's OS/package/socket inventory from Synapse into the graph (v0.3.0). |
+| `librarian.ingest_inventory` | librarian | One-call record of a node's package or socket inventory (v0.3.0).    |
+| `librarian.enrich_all`     | librarian | OSV vulnerabilities, endoflife.date EOL, abuse.ch IOC matching (v0.3.0). |
 
 ## Layout
 
