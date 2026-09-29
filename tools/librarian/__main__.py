@@ -36,6 +36,7 @@ from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 
 from tools._shared import write_journal
+from tools._shared.json_safe import to_json_safe
 from tools.librarian import (
     apply_pending,
     explain,
@@ -167,14 +168,26 @@ def _build_server() -> Server:
                     ),
                 )
             ]
-        return [
-            TextContent(
-                type="text",
-                text=response.model_dump_json(exclude_none=True),
-            )
-        ]
+        return [TextContent(type="text", text=_encode_response(response))]
 
     return server
+
+
+def _encode_response(response: BaseModel) -> str:
+    """JSON-encode a tool response, never failing on a value type.
+
+    2026-09-29: a Neo4j DateTime in a result made encoding raise AFTER a
+    write had landed, so the agent saw a failure for a successful write.
+    Results are made JSON-safe at the source (tools._shared.json_safe);
+    this is the backstop, so a new value type degrades to its string form
+    instead of hiding the real outcome."""
+    import json
+
+    try:
+        return response.model_dump_json(exclude_none=True)
+    except Exception:
+        data = to_json_safe(response.model_dump(exclude_none=True))
+        return json.dumps(data, default=str)
 
 
 def _error_json(error: str, details: dict[str, Any]) -> str:
