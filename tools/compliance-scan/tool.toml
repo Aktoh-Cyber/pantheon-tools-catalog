@@ -5,10 +5,53 @@
 # (+ wit/ host imports where present); the tool source is the source of truth.
 [tool]
 name = "compliance-scan"
-version = "0.1.0"
+version = "0.2.0"
 language = "rust"
 
 [tool.capabilities]
 network_mode = "none"
 mounts = []
-host_apis = ["inventory.os-info", "package.query", "service.status"]
+# fs.read-file / fs.list-dir serve `config` rules (0.2.0). They read nothing unless the
+# caller also grants capabilities.fs_roots (a runtime parameter the manifest cannot know).
+host_apis = ["inventory.os-info", "package.query", "service.status", "fs.read-file", "fs.list-dir"]
+
+# Surfaced verbatim by synapse.tool_spec (manifest.metadata), so an agent can see the
+# argument shape instead of guessing it. Keep in step with src/main.rs.
+[tool.metadata]
+summary = "Evaluate a compliance policy bundle on the node: pass/fail/unknown/error per rule, with evidence. `unknown` never counts as a pass."
+invoke_hint = "No `rules` runs the built-in baseline (ssh-root-login, ssh-empty-passwords). For `config` rules grant capabilities.fs_roots covering the file's directory, e.g. {\"fs_roots\": [\"/etc/ssh\"]} (Windows: [\"C:\\\\ProgramData\\\\ssh\"]); host_apis default from this manifest."
+rule_types = ["os", "package", "service", "file", "config"]
+
+[tool.metadata.args_schema]
+type = "object"
+additionalProperties = false
+
+[tool.metadata.args_schema.properties.policy_id]
+type = "string"
+description = "Label echoed in the result. Default: `adhoc`, or `synapse-baseline` when rules are omitted."
+
+[tool.metadata.args_schema.properties.rules]
+type = "array"
+minItems = 1
+description = "Optional. Omit to run the built-in baseline. Each rule is one of the shapes below; a rule missing a required field comes back outcome=error naming the expected shape."
+
+[tool.metadata.args_schema.properties.rules.items]
+type = "object"
+required = ["id", "type"]
+
+[tool.metadata.args_schema.properties.rules.items.properties.id]
+type = "string"
+
+[tool.metadata.args_schema.properties.rules.items.properties.type]
+enum = ["os", "package", "service", "file", "config"]
+
+[tool.metadata.args_schema.properties.rules.items.properties.severity]
+type = "string"
+description = "Optional; echoed on the result."
+
+[tool.metadata.rule_shapes]
+os = '{"id":"os-supported","type":"os","kind_in":["linux-debian","linux-rhel","linux-alpine","macos","windows"],"min_version":"12"}  (kind_in, min_version optional)'
+package = '{"id":"no-telnet","type":"package","name":"telnet","installed":false,"min_version":"1.0"}  (name REQUIRED; installed default true)'
+service = '{"id":"ssh-up","type":"service","name":"ssh","state":"running"}  (name REQUIRED; state running|stopped|absent, default running)'
+file = '{"id":"no-secret","type":"file","path":"/work/secret.key","exists":false}  (the tool sandbox /work, NOT the host disk; use config rules for host files)'
+config = '{"id":"ssh-root-login","type":"config","path":"/etc/ssh/sshd_config","directive":"PermitRootLogin","allowed":["no"],"default":"prohibit-password","missing_file":"pass"}  (path, directive, allowed|expected REQUIRED; sshd-style keyword file on the HOST: first occurrence wins, Include followed, Match ends the global section; needs capabilities.fs_roots)'
