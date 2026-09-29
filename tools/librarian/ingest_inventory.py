@@ -13,7 +13,8 @@ Pass the Synapse tool's output (``result.inline_output``) as-is, for one host:
   longer shows is deleted. With ``skip_transient`` (default), loopback-only
   listeners on ephemeral ports (dev tooling, IDE and language-server plumbing)
   and UDP on ephemeral ports (client sockets) are counted on the Host, not
-  modelled. Established peers, when present, land on the Host as
+  modelled; a socket with no local port (port 0) is never a service.
+  Established peers, when present, land on the Host as
   ``remote_peers`` (public addresses only) for ``librarian.match_iocs``.
 
 The Host must already exist (``upsert_node`` label Host, merge key node_id),
@@ -240,12 +241,17 @@ def _service_rows(
     host_id: str, host_name: str, services: list[dict[str, Any]], skip_transient: bool
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     rows: list[dict[str, Any]] = []
-    skipped = {"loopback_ephemeral": 0, "udp_ephemeral": 0}
+    skipped = {"loopback_ephemeral": 0, "udp_ephemeral": 0, "unbound_port": 0}
     for s in services:
         if not isinstance(s, dict) or s.get("port") is None:
             continue
         proto = str(s.get("proto") or "tcp")
         port = int(s["port"])
+        if port == 0:
+            # A socket with no local port yet (macOS lists `*.*`): nothing
+            # can reach it, so it is not a service.
+            skipped["unbound_port"] += 1
+            continue
         exposure = str(s.get("exposure") or "")
         ephemeral = bool(s.get("ephemeral_port"))
         if skip_transient and ephemeral:
