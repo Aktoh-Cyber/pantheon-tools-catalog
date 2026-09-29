@@ -11,6 +11,12 @@ pantheon + PMC's `/graph` UI.
 | `librarian.upsert_node`    | `librarian/upsert_node.py`| yes      | AgentService only   |
 | `librarian.upsert_edge`    | `librarian/upsert_edge.py`| yes      | AgentService only   |
 | `librarian.purge_session`  | `librarian/purge_session.py`| yes (destructive) | AgentService only |
+| `librarian.apply_pending`  | `librarian/apply_pending.py`| yes (replay) | AgentService only |
+
+These are a **tenant-local stdio MCP server** (`python -m tools.librarian`)
+that the pantheon container runs next to its own graph store. They are
+not Synapse tools: Synapse tools execute on customer nodes, which cannot
+reach the tenant's loopback-bound graph store.
 
 Write tools are Cedar-gated via the `LibrarianWrite` action permit
 (SYNAPSE-32). `purge_session` is gated by the `LibrarianPurge`
@@ -60,3 +66,23 @@ Every write call stamps the resulting node/edge with:
 
 The provenance keys are reserved — callers cannot override them
 via `props`.
+
+## Write journal (v0.2.3)
+
+When `LIBRARIAN_STATE_DIR` is set (pantheon sets `/opt/data/graph`), the
+write tools report on themselves:
+
+- `server.json` is written when the MCP server starts. It shows the agent
+  runtime actually connected the server, not just that it is configured.
+- `write-status.json` records the last success, the last store error, and the
+  current failure streak.
+- `pending/<tool>-<sha>.json` holds one entry per commission the **store**
+  failed to take. The entry is keyed by the commission, so a retry that
+  fails again updates it and one that succeeds clears it.
+  `librarian.apply_pending` lists entries (`confirm=false`) or replays them
+  (`confirm=true`).
+
+Input validation errors, reserved-key conflicts, and missing edge endpoints
+are the caller's to fix. They are returned, never queued. The tenant sidecar
+reads these files for PMC's Knowledge -> Graph tab, so "nothing recorded
+yet" is never shown when recording is actually failing.
