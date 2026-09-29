@@ -9,7 +9,8 @@ Pantheon's per-profile config.yaml registers this in the
 `librarian.*` tool calls through it.
 
 Each tool (schema, query, explain, upsert_node, upsert_edge,
-purge_session, apply_pending) is registered with its pydantic input schema; the
+purge_session, apply_pending, and since v0.3.0 ingest_inventory and the
+enrichers) is registered with its pydantic input schema; the
 server validates the input against the schema, calls the tool's
 `run()`, and returns the response as a JSON-serializable dict.
 
@@ -39,7 +40,12 @@ from tools._shared import write_journal
 from tools._shared.json_safe import to_json_safe
 from tools.librarian import (
     apply_pending,
+    enrich_all,
+    enrich_eol,
+    enrich_vulnerabilities,
     explain,
+    ingest_inventory,
+    match_iocs,
     purge_session,
     query,
     schema,
@@ -97,6 +103,51 @@ _TOOLS: dict[str, _ToolEntry] = {
         "is up to date.",
         apply_pending.ApplyPendingInput,
         apply_pending.run,
+    ),
+    "librarian.ingest_inventory": (
+        "Record a node tool's inventory for one Host in ONE call: pass the "
+        "Synapse tool's result.inline_output unchanged. tool=package-inventory "
+        "-> Package nodes + HAS_PACKAGE (packages no longer listed are "
+        "unlinked); tool=socket-inventory -> Service nodes + LISTENS_ON "
+        "(services no longer listening are removed) and the host's public "
+        "remote_peers. The Host (merge key node_id) must exist. Use this "
+        "instead of one upsert per package or port.",
+        ingest_inventory.IngestInventoryInput,
+        ingest_inventory.run,
+    ),
+    "librarian.enrich_all": (
+        "Run after EVERY sweep commission, once the inventories are "
+        "recorded: enrich_vulnerabilities (OSV), enrich_eol "
+        "(endoflife.date) and match_iocs (abuse.ch), in that order. Reports "
+        "each step's counts; ok only when all three succeeded.",
+        enrich_all.EnrichAllInput,
+        enrich_all.run,
+    ),
+    "librarian.enrich_vulnerabilities": (
+        "Match every Host's packages against OSV (osv.dev). Writes "
+        "Vulnerability nodes (id, CVEs, severity, CVSS, summary) and "
+        "Package-[:AFFECTED_BY {fixed_version, fix_available}]->Vulnerability; "
+        "rolls counts up onto Package and Host. Debian/Ubuntu apt packages "
+        "are checked (binary->source mapped); Homebrew and Windows packages "
+        "are reported unsupported, never guessed.",
+        enrich_vulnerabilities.EnrichVulnerabilitiesInput,
+        enrich_vulnerabilities.run,
+    ),
+    "librarian.enrich_eol": (
+        "End-of-life status from endoflife.date for each Host's OS release "
+        "and for runtimes among its packages (python, nodejs, openssl, perl, "
+        "...). Sets eol_* properties on Host and Package and a Finding "
+        "(tool eol) per end-of-life item.",
+        enrich_eol.EnrichEolInput,
+        enrich_eol.run,
+    ),
+    "librarian.match_iocs": (
+        "Match observed IPs/domains/hashes in the graph (e.g. a Host's "
+        "remote_peers) against abuse.ch threat intel (ThreatFox, Feodo). "
+        "A match writes an Indicator, MATCHES_IOC, and a high-severity "
+        "Finding. Reports feeds that need an API key.",
+        match_iocs.MatchIocsInput,
+        match_iocs.run,
     ),
     "librarian.purge_session": (
         "DETACH DELETE every node carrying session_id == <input>. "

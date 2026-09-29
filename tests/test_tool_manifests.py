@@ -62,8 +62,9 @@ def _cargo_version(tool_dir: Path) -> str:
 def test_every_wasm_tool_has_a_tool_toml() -> None:
     missing = [p.name for p in WASM_TOOLS if not (p / "tool.toml").is_file()]
     assert not missing, f"WASM tools missing tool.toml: {missing}"
-    # Regression guard: the current catalog is 32 WASM tools.
-    assert len(TOOL_TOMLS) == 32
+    # Regression guard: the current catalog is 33 WASM tools (socket-inventory
+    # joined in v0.3.0).
+    assert len(TOOL_TOMLS) == 33
     assert len(TOOL_TOMLS) == len(WASM_TOOLS)
 
 

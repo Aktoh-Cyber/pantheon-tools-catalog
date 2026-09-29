@@ -12,6 +12,11 @@ pantheon + PMC's `/graph` UI.
 | `librarian.upsert_edge`    | `librarian/upsert_edge.py`| yes      | AgentService only   |
 | `librarian.purge_session`  | `librarian/purge_session.py`| yes (destructive) | AgentService only |
 | `librarian.apply_pending`  | `librarian/apply_pending.py`| yes (replay) | AgentService only |
+| `librarian.ingest_inventory` | `librarian/ingest_inventory.py` | yes (bulk) | AgentService only |
+| `librarian.enrich_all`     | `librarian/enrich_all.py` | yes (bulk) | AgentService only |
+| `librarian.enrich_vulnerabilities` | `librarian/enrich_vulnerabilities.py` | yes (bulk) | AgentService only |
+| `librarian.enrich_eol`     | `librarian/enrich_eol.py` | yes (bulk) | AgentService only |
+| `librarian.match_iocs`     | `librarian/match_iocs.py` | yes (on match) | AgentService only |
 
 These are a **tenant-local stdio MCP server** (`python -m tools.librarian`)
 that the pantheon container runs next to its own graph store. They are
@@ -86,3 +91,32 @@ Input validation errors, reserved-key conflicts, and missing edge endpoints
 are the caller's to fix. They are returned, never queued. The tenant sidecar
 reads these files for PMC's Knowledge -> Graph tab, so "nothing recorded
 yet" is never shown when recording is actually failing.
+
+## Sweep ingest and enrichment (v0.3.0)
+
+After a sweep, the librarian records each node tool's output with ONE call per
+host and tool, then enriches the graph from public feeds:
+
+1. `librarian.ingest_inventory` with `tool` = `package-inventory` or
+   `socket-inventory` and `output` = the Synapse result's `inline_output`,
+   unchanged. It writes `Package` + `HAS_PACKAGE`, or `Service` +
+   `LISTENS_ON` (and the host's public `remote_peers`), and reconciles: a
+   package or service the new snapshot no longer lists is unlinked/removed.
+   An empty or truncated snapshot never removes anything.
+2. `librarian.enrich_all` runs, in order:
+   - `enrich_vulnerabilities`: OSV (`api.osv.dev`), Debian/Ubuntu apt
+     packages, binary -> source mapped from the release's `Packages.xz`
+     (epochs restored). `Vulnerability` nodes and `AFFECTED_BY
+     {fixed_version, fix_available}`. Severity is the distro's triage when it
+     has one (Debian urgency, Ubuntu priority), else the CVSS v3 base score;
+     both are stored. Homebrew/Windows/RPM/Alpine are `unsupported`, with the
+     reason.
+   - `enrich_eol`: endoflife.date for OS releases and runtimes; `eol_*`
+     properties and `Finding` (tool `eol`) per end-of-life item.
+   - `match_iocs`: abuse.ch ThreatFox (48 h export) + Feodo Tracker, key-less.
+     Set `THREATFOX_AUTH_KEY` (abuse.ch Auth-Key) to use ThreatFox's API
+     (7 days) instead; `LIBRARIAN_IOC_FEEDS` picks feeds.
+
+Feeds are fetched by the tenant container, never by customer nodes, and cached
+under `$LIBRARIAN_STATE_DIR/feeds`. Every node and edge carries the usual
+provenance (`commissioned_by`, `commissioned_at`, `session_id`).

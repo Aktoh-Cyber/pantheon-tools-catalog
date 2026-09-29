@@ -1,0 +1,77 @@
+package synapse:host@0.1.0;
+
+/// Read-only view of the endpoint's running processes and network sockets,
+/// sourced from `/proc` on Linux. This is the IR / threat-hunt surface:
+/// unexpected executables, beaconing sockets, injected process trees.
+///
+/// There is NO process control here — no kill, no signal. Mutation is a
+/// separately-governed Tier-3 concern. Every call is gated on `host_apis`
+/// (`process.list-processes` / `process.list-sockets` /
+/// `process.list-owned-sockets`); an ungranted lease is
+/// denied and audited, never silently served.
+interface process {
+    variant proc-error {
+        denied(string),
+        io-error(string),
+    }
+
+    record proc-info {
+        pid: u32,
+        ppid: u32,
+        /// The `comm` (short name) from /proc/<pid>/stat.
+        name: string,
+        /// Resolved /proc/<pid>/exe target, or "" if unreadable.
+        exe: string,
+        /// Single-letter state: R S D Z T ...
+        state: string,
+        rss-kb: u64,
+    }
+
+    record socket-info {
+        /// tcp | tcp6 | udp | udp6
+        protocol: string,
+        local-addr: string,
+        local-port: u16,
+        /// LISTEN | ESTABLISHED | TIME_WAIT | ... (decoded from the hex st field)
+        state: string,
+        inode: u64,
+    }
+
+    /// Snapshot the process table.
+    list-processes: func() -> result<list<proc-info>, proc-error>;
+
+    /// List sockets from /proc/net/{tcp,tcp6,udp,udp6}. Listening + established.
+    list-sockets: func() -> result<list<socket-info>, proc-error>;
+
+    /// One socket together with the process that owns it: the host's service
+    /// and exposure inventory. `list-sockets` cannot say who owns a socket (it
+    /// carries only the inode) and is Linux-only; this call resolves the owner
+    /// on Linux (/proc/<pid>/fd), macOS (`netstat -anv`) and Windows
+    /// (`netstat -ano`). Read-only: it lists sockets, it never opens one.
+    record owned-socket {
+        /// tcp | tcp6 | udp | udp6
+        protocol: string,
+        /// TCP: LISTEN | ESTABLISHED | TIME_WAIT | ...
+        /// UDP: UNCONN (bound, no peer) | ESTABLISHED (connected).
+        state: string,
+        /// Numeric address. IPv6 in RFC 5952 form. `0.0.0.0` / `::` = every
+        /// interface.
+        local-addr: string,
+        local-port: u16,
+        /// Peer address; "" when the socket has no peer (listeners, unconnected
+        /// UDP).
+        remote-addr: string,
+        remote-port: u16,
+        /// Owning process id, when the platform exposes it.
+        pid: option<u32>,
+        /// Owning process short name; "" when unknown.
+        process: string,
+    }
+
+    /// Sockets with their owning process. `listening-only = true` returns only
+    /// listening TCP sockets and bound, unconnected UDP sockets (the service
+    /// inventory); `false` also returns established and other TCP states and
+    /// connected UDP (the peers a threat hunt matches against indicators).
+    /// Gated on `process.list-owned-sockets`.
+    list-owned-sockets: func(listening-only: bool) -> result<list<owned-socket>, proc-error>;
+}

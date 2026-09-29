@@ -50,6 +50,7 @@ KNOWN_HOST_APIS: frozenset[str] = frozenset(
         "fs.list-dir",
         "process.list-processes",
         "process.list-sockets",
+        "process.list-owned-sockets",
     }
 )
 
