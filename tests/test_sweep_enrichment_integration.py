@@ -368,3 +368,105 @@ async def test_ingest_refuses_unknown_host_and_foreign_output(neo4j_clean) -> No
         )
     )
     assert not r3.ok and "run itself failed" in (r3.error or "")
+
+
+class FakeSynapse:
+    tenant = "aktoh"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def nodes(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "node_id": "deb",
+                "name": "720eb9d52505",
+                "connected": True,
+                "status": "online",
+                "current_version": "node-v0.1.17",
+            },
+            {
+                "node_id": "win",
+                "name": "Aktoh",
+                "connected": False,
+                "status": "offline",
+                "last_seen": "2026-09-28T22:59:18Z",
+            },
+        ]
+
+    def tools(self) -> list[dict[str, Any]]:
+        return [
+            {"tool_name": t, "tool_digest": f"sha256:{t}", "source": "catalog"}
+            for t in ("os-fingerprint", "package-inventory", "socket-inventory")
+        ] + [
+            {
+                "tool_name": "package-inventory",
+                "tool_digest": "sha256:old",
+                "source": "tenant",
+            }
+        ]
+
+    def invoke(
+        self, node_id: str, digest: str, args: dict[str, Any], deadline: int = 120
+    ) -> dict[str, Any]:
+        self.calls.append((node_id, digest))
+        if digest == "sha256:os-fingerprint":
+            out: dict[str, Any] = {
+                "granted": True,
+                "os": {"kind": "linux-debian", "version": "12", "arch": "aarch64"},
+            }
+        elif digest == "sha256:package-inventory":
+            return {"exit_kind": "trap", "exit_code": -1, "inline_output": None}
+        elif digest == "sha256:old":
+            out = {
+                "total_installed": 1,
+                "packages": [
+                    {"name": "libssl3", "version": "3.0.20-1~deb12u2", "source": "apt"}
+                ],
+            }
+        else:
+            out = {
+                "services": [
+                    {"proto": "tcp", "port": 22, "process": "sshd", "exposure": "all"}
+                ],
+                "remote_peers": ["1.1.1.1"],
+            }
+        return {"exit_kind": "success", "exit_code": 0, "inline_output": out}
+
+
+async def test_collect_then_enrich_in_one_call(
+    neo4j_clean, canned_feeds, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tools.librarian import collect_inventory
+
+    fake = FakeSynapse()
+    monkeypatch.setattr(
+        collect_inventory.SynapseClient,
+        "from_environment",
+        classmethod(lambda cls: fake),
+    )
+    out = await run_enrich_all(EnrichAllInput(collect=True, **ENV))
+    col = out.result["collect"]  # type: ignore[index]
+    assert col["ok"] is True, col
+    assert col["result"]["skipped_offline"] == [
+        "Aktoh (last seen 2026-09-28T22:59:18Z)"
+    ]
+    node = col["result"]["nodes"][0]
+    assert node["os-fingerprint"] == "linux-debian 12"
+    assert (
+        node["package-inventory"]["recorded"]["packages"] == 1
+    ), "fell back to the older digest"
+    assert ("deb", "sha256:old") in fake.calls
+    assert (
+        await _count(
+            "MATCH (h:Host {node_id:'deb', os_kind:'linux-debian', agent_version:'node-v0.1.17'})-[:LISTENS_ON]->(:Service) RETURN count(h) AS c"
+        )
+        == 1
+    )
+    assert (
+        await _count(
+            "MATCH (h:Host {node_id:'win', connected:false}) RETURN count(h) AS c"
+        )
+        == 1
+    )
+    assert out.result["vulnerabilities"]["ok"] is True  # type: ignore[index]

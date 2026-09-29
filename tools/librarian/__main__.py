@@ -24,6 +24,7 @@ pydantic-shaped `run()` functions and the MCP wire format. The
 tool implementations stay framework-agnostic; the MCP framework
 is only imported in this module.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +41,7 @@ from tools._shared import write_journal
 from tools._shared.json_safe import to_json_safe
 from tools.librarian import (
     apply_pending,
+    collect_inventory,
     enrich_all,
     enrich_eol,
     enrich_vulnerabilities,
@@ -104,6 +106,16 @@ _TOOLS: dict[str, _ToolEntry] = {
         apply_pending.ApplyPendingInput,
         apply_pending.run,
     ),
+    "librarian.collect_inventory": (
+        "Sweep step 1: pull each connected node's inventory straight from "
+        "Synapse into the graph (os-fingerprint -> Host OS facts, "
+        "package-inventory -> Package/HAS_PACKAGE, socket-inventory -> "
+        "Service/LISTENS_ON + remote_peers). No output passes through a "
+        "reply, so nothing is truncated. Read-only tools only. Then run "
+        "librarian.enrich_all.",
+        collect_inventory.CollectInventoryInput,
+        collect_inventory.run,
+    ),
     "librarian.ingest_inventory": (
         "Record a node tool's inventory for one Host in ONE call: pass the "
         "Synapse tool's result.inline_output unchanged. tool=package-inventory "
@@ -116,10 +128,11 @@ _TOOLS: dict[str, _ToolEntry] = {
         ingest_inventory.run,
     ),
     "librarian.enrich_all": (
-        "Run after EVERY sweep commission, once the inventories are "
-        "recorded: enrich_vulnerabilities (OSV), enrich_eol "
-        "(endoflife.date) and match_iocs (abuse.ch), in that order. Reports "
-        "each step's counts; ok only when all three succeeded.",
+        "Sweep step 2, after EVERY sweep commission: enrich_vulnerabilities "
+        "(OSV), enrich_eol (endoflife.date) and match_iocs (abuse.ch), in "
+        "that order. collect=true runs librarian.collect_inventory first, "
+        "so one call does the whole sweep. Reports each step's counts; ok "
+        "only when every step succeeded.",
         enrich_all.EnrichAllInput,
         enrich_all.run,
     ),
@@ -179,9 +192,7 @@ def _build_server() -> Server:
         ]
 
     @server.call_tool()  # type: ignore[misc]
-    async def _call_tool(
-        name: str, arguments: dict[str, Any]
-    ) -> list[TextContent]:
+    async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         entry = _TOOLS.get(name)
         if entry is None:
             return [
@@ -189,8 +200,8 @@ def _build_server() -> Server:
                     type="text",
                     text=(
                         '{"ok": false, "error": "unknown tool: '
-                        f'{name}\", "details": {{"available": '
-                        f'{sorted(_TOOLS)}}}}}'
+                        f'{name}", "details": {{"available": '
+                        f"{sorted(_TOOLS)}}}}}"
                     ),
                 )
             ]

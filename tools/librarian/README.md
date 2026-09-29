@@ -12,6 +12,7 @@ pantheon + PMC's `/graph` UI.
 | `librarian.upsert_edge`    | `librarian/upsert_edge.py`| yes      | AgentService only   |
 | `librarian.purge_session`  | `librarian/purge_session.py`| yes (destructive) | AgentService only |
 | `librarian.apply_pending`  | `librarian/apply_pending.py`| yes (replay) | AgentService only |
+| `librarian.collect_inventory` | `librarian/collect_inventory.py` | yes (bulk) | AgentService only |
 | `librarian.ingest_inventory` | `librarian/ingest_inventory.py` | yes (bulk) | AgentService only |
 | `librarian.enrich_all`     | `librarian/enrich_all.py` | yes (bulk) | AgentService only |
 | `librarian.enrich_vulnerabilities` | `librarian/enrich_vulnerabilities.py` | yes (bulk) | AgentService only |
@@ -94,9 +95,17 @@ yet" is never shown when recording is actually failing.
 
 ## Sweep ingest and enrichment (v0.3.0)
 
-After a sweep, the librarian records each node tool's output with ONE call per
-host and tool, then enriches the graph from public feeds:
+After a sweep, the librarian records every node's inventory and enriches the
+graph from public feeds. `librarian.enrich_all` with `collect: true` does all
+of it in one call.
 
+0. `librarian.collect_inventory` pulls each connected node's `os-fingerprint`,
+   `package-inventory` and `socket-inventory` output straight from Synapse
+   (with the librarian profile's own agent token, read from
+   `/opt/data/profiles/librarian/.env`) and records it via
+   `ingest_inventory`. No inventory passes through an agent's reply: relayed
+   that way, the 09-28 aktoh sweep landed 15 of 91 packages with epochs
+   dropped. Only those three read-only tools, with fixed arguments.
 1. `librarian.ingest_inventory` with `tool` = `package-inventory` or
    `socket-inventory` and `output` = the Synapse result's `inline_output`,
    unchanged. It writes `Package` + `HAS_PACKAGE`, or `Service` +

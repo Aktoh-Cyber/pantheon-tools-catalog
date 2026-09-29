@@ -412,3 +412,70 @@ def test_flat_drops_unstorable_values() -> None:
         "e": ["a"],
         "f": [],
     }
+
+
+# --- Synapse client (collect_inventory) -------------------------------------
+
+
+def _jwt(claims: dict[str, object]) -> str:
+    import base64
+
+    def b64(b: bytes) -> str:
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+    return f"{b64(b'{}')}.{b64(json.dumps(claims).encode())}.sig"
+
+
+def test_client_reads_the_librarian_token_and_tenant(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from tools._shared.synapse_client import SynapseClient
+
+    env = tmp_path / ".env"
+    env.write_text(f"FOO='x'\nSYNAPSE_AGENT_JWT='{_jwt({'tenant_id': 'aktoh'})}'\n")
+    monkeypatch.delenv("SYNAPSE_AGENT_JWT", raising=False)
+    monkeypatch.delenv("SYNAPSE_GATEWAY_URL", raising=False)
+    monkeypatch.delenv("LIBRARIAN_SYNAPSE_URL", raising=False)
+    monkeypatch.setenv("LIBRARIAN_SYNAPSE_ENV", str(env))
+    c = SynapseClient.from_environment()
+    assert c.tenant == "aktoh"
+    assert c.url == "https://synapse.aktohcyber.com"
+
+
+def test_client_refuses_missing_token_and_plain_http(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from tools._shared.synapse_client import SynapseClient, SynapseError
+
+    monkeypatch.delenv("SYNAPSE_AGENT_JWT", raising=False)
+    monkeypatch.setenv("LIBRARIAN_SYNAPSE_ENV", str(tmp_path / "missing.env"))
+    with pytest.raises(SynapseError, match="no Synapse agent token"):
+        SynapseClient.from_environment()
+    with pytest.raises(SynapseError, match="non-https"):
+        SynapseClient("http://synapse.example", "t", "aktoh")
+
+
+def test_candidate_digests_prefer_newest_catalog_release() -> None:
+    from tools._shared.synapse_client import candidate_digests
+
+    tools = [
+        {
+            "tool_name": "package-inventory",
+            "tool_digest": "sha256:old",
+            "source": "tenant",
+            "uploaded_at": "2026-09-21",
+        },
+        {
+            "tool_name": "package-inventory",
+            "tool_digest": "sha256:new",
+            "source": "catalog",
+            "uploaded_at": "2026-09-29",
+        },
+        {
+            "tool_name": "socket-inventory",
+            "tool_digest": "sha256:s",
+            "source": "catalog",
+        },
+    ]
+    assert candidate_digests(tools, "package-inventory") == ["sha256:new", "sha256:old"]
+    assert candidate_digests(tools, "nope") == []
