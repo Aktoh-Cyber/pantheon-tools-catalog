@@ -396,7 +396,7 @@ def test_service_rows_skip_transient_and_key_by_owner() -> None:
     ]
     rows, skipped = ingest_inventory._service_rows("n1", "tek.local", services, True)
     assert [r["key"] for r in rows] == ["n1|tcp/22|sshd", "n1|tcp/52441|Transmission"]
-    assert skipped == {"loopback_ephemeral": 1, "udp_ephemeral": 1}
+    assert skipped == {"loopback_ephemeral": 1, "udp_ephemeral": 1, "unbound_port": 0}
     assert rows[0]["props"]["name"] == "sshd tcp/22"
     assert rows[0]["edge"] == {
         "port": 22,
@@ -546,3 +546,9 @@ async def test_collect_paging_reports_an_unsplittable_prefix(
         out is not None and out["truncated"] is True
     ), "short snapshot never reconciles"
     assert "lib*" in out["note"]
+
+
+def test_service_rows_skip_unbound_port_zero() -> None:
+    services = [{"proto": "udp", "port": 0, "process": "airportd", "exposure": "all"}]
+    rows, skipped = ingest_inventory._service_rows("n1", "tek.local", services, False)
+    assert rows == [] and skipped["unbound_port"] == 1
