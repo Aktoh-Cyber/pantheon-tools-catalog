@@ -1,0 +1,53 @@
+package synapse:host@0.1.0;
+
+/// Read-only access to the ENDPOINT filesystem — the real host disk, not the
+/// wasm sandbox's empty `/work`. This is the interface that turns the fs / fim /
+/// secret-scan tools from "reads whatever the orchestrator staged" into "reads
+/// the actual machine".
+///
+/// Authority is never ambient. Every path is checked against the lease's
+/// `fs_roots` allowlist (CapabilityVector): a target is admitted only when its
+/// canonical path sits inside one of the granted roots on a path boundary, so
+/// `..` traversal and symlink escapes cannot climb out. An empty `fs_roots`
+/// denies everything — fail closed, exactly like the network destinations list.
+/// Reads are size-capped by the caller. There is no write surface here on
+/// purpose; mutation belongs to a separately-governed Tier-3 provider.
+interface fs {
+    /// Why a filesystem call was refused or failed. `denied` covers both the
+    /// capability gate (api not in host_apis) and the root-allowlist gate
+    /// (path outside fs_roots) — the audit log distinguishes them.
+    variant fs-error {
+        denied(string),
+        not-found(string),
+        too-large(string),
+        io-error(string),
+    }
+
+    record file-stat {
+        path: string,
+        is-dir: bool,
+        is-symlink: bool,
+        size: u64,
+        mode: u32,
+        mtime-unix: s64,
+    }
+
+    record dir-entry {
+        name: string,
+        is-dir: bool,
+        is-symlink: bool,
+    }
+
+    /// Read a file's bytes, capped at `max-bytes`. A file larger than the cap
+    /// returns `too-large` rather than a truncated read, so a tool never mistakes
+    /// a partial file for the whole one.
+    read-file: func(path: string, max-bytes: u64) -> result<list<u8>, fs-error>;
+
+    /// Stat a path without reading its contents. Reports whether it is a symlink
+    /// so a caller can decide whether to trust the resolved target.
+    stat: func(path: string) -> result<file-stat, fs-error>;
+
+    /// List a directory, non-recursively. Recursion is the tool's job (so the
+    /// tool owns the traversal budget), built on repeated list-dir + stat.
+    list-dir: func(path: string) -> result<list<dir-entry>, fs-error>;
+}
