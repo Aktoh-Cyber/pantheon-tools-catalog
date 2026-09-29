@@ -37,9 +37,16 @@ TOOL = "librarian.collect_inventory"
 INVENTORY_TOOLS = ("os-fingerprint", "package-inventory", "socket-inventory")
 _ARGS: dict[str, dict[str, Any]] = {
     "os-fingerprint": {},
-    "package-inventory": {"max": 10000},
-    "socket-inventory": {"include_connections": True, "max_connections": 500},
+    "package-inventory": {},
+    "socket-inventory": {"include_connections": True, "max_connections": 200},
 }
+# A node captures at most 64 KiB of a tool's stdout, and package-inventory
+# prints every package it returns. 500 rows stay under that even with long
+# Windows display names. A host with more is read page by page with
+# name_prefix (see _collect_packages).
+PKG_PAGE = 500
+_PREFIX_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_MAX_PREFIX_DEPTH = 3
 
 
 class CollectInventoryInput(Commission):
@@ -122,7 +129,10 @@ async def run(input: CollectInventoryInput) -> CollectInventoryToolResponse:
             continue
         summary: dict[str, Any] = {"node_id": nid, "name": name}
         for tool in [t for t in INVENTORY_TOOLS if t in input.tools]:
-            out, err = await _invoke(client, catalog, nid, tool)
+            if tool == "package-inventory":
+                out, err = await _collect_packages(client, catalog, nid)
+            else:
+                out, err = await _invoke(client, catalog, nid, tool, _ARGS[tool])
             if err or out is None:
                 summary[tool] = f"failed: {err}"
                 res.errors.append(f"{name} {tool}: {err}")
@@ -161,8 +171,57 @@ async def run(input: CollectInventoryInput) -> CollectInventoryToolResponse:
     )
 
 
+async def _collect_packages(
+    client: SynapseClient, catalog: list[dict[str, Any]], node_id: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """The whole package list in pages that fit the node's output capture."""
+    tool = "package-inventory"
+    first, err = await _invoke(client, catalog, node_id, tool, {"max": PKG_PAGE})
+    if first is None or not first.get("truncated"):
+        return first, err
+    total = int(first.get("total_installed") or 0)
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    incomplete: list[str] = []
+
+    async def walk(prefix: str) -> None:
+        out, e = await _invoke(
+            client, catalog, node_id, tool, {"max": PKG_PAGE, "name_prefix": prefix}
+        )
+        if out is None:
+            incomplete.append(f"{prefix}*: {e}")
+            return
+        if out.get("truncated") and len(prefix) < _MAX_PREFIX_DEPTH:
+            for ch in _PREFIX_CHARS:
+                await walk(prefix + ch)
+            return
+        if out.get("truncated"):
+            incomplete.append(f"{prefix}*: more than {PKG_PAGE} names")
+        for p in out.get("packages") or []:
+            if isinstance(p, dict) and p.get("name"):
+                rows[(str(p["name"]), str(p.get("version") or ""))] = p
+
+    for ch in _PREFIX_CHARS:
+        await walk(ch)
+    merged = {
+        **{k: v for k, v in first.items() if k != "packages"},
+        "packages": list(rows.values()),
+        "matched": len(rows),
+        # Names starting outside [A-Za-z0-9] are not reachable by prefix; a
+        # short count keeps the snapshot from reconciling (never unlinks).
+        "truncated": bool(incomplete) or len(rows) < total,
+        "paged": True,
+    }
+    if incomplete:
+        merged["note"] = "incomplete pages: " + "; ".join(incomplete[:5])
+    return merged, None
+
+
 async def _invoke(
-    client: SynapseClient, catalog: list[dict[str, Any]], node_id: str, tool: str
+    client: SynapseClient,
+    catalog: list[dict[str, Any]],
+    node_id: str,
+    tool: str,
+    args: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, str | None]:
     digests = candidate_digests(catalog, tool)
     if not digests:
@@ -170,9 +229,7 @@ async def _invoke(
     last = "no attempt"
     for digest in digests:
         try:
-            result = await asyncio.to_thread(
-                client.invoke, node_id, digest, _ARGS[tool]
-            )
+            result = await asyncio.to_thread(client.invoke, node_id, digest, args)
         except SynapseError as exc:
             last = str(exc)
             continue

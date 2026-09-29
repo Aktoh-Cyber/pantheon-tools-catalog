@@ -490,3 +490,59 @@ def test_candidate_digests_prefer_newest_catalog_release() -> None:
     ]
     assert candidate_digests(tools, "package-inventory") == ["sha256:new", "sha256:old"]
     assert candidate_digests(tools, "nope") == []
+
+
+async def test_collect_pages_packages_by_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools.librarian import collect_inventory as ci
+
+    names = ["apt", "bash", "libc6", "libssl3", "lz4", "zlib1g"]
+    monkeypatch.setattr(ci, "PKG_PAGE", 2)
+    calls: list[str] = []
+
+    async def fake_invoke(client, catalog, node_id, tool, args):  # type: ignore[no-untyped-def]
+        prefix = args.get("name_prefix", "")
+        calls.append(prefix)
+        hit = [n for n in names if n.startswith(prefix)]
+        page = [
+            {"name": n, "version": "1", "source": "apt"} for n in hit[: args["max"]]
+        ]
+        return {
+            "total_installed": len(names),
+            "matched": len(hit),
+            "truncated": len(hit) > args["max"],
+            "packages": page,
+        }, None
+
+    monkeypatch.setattr(ci, "_invoke", fake_invoke)
+    out, err = await ci._collect_packages(None, [], "n1")  # type: ignore[arg-type]
+    assert err is None and out is not None
+    assert sorted(p["name"] for p in out["packages"]) == names
+    assert out["truncated"] is False and out["paged"] is True
+    assert "l" in calls and "li" in calls, "an overfull prefix is split"
+
+
+async def test_collect_paging_reports_an_unsplittable_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools.librarian import collect_inventory as ci
+
+    names = ["libaa1", "libaa2", "libaa3"]
+    monkeypatch.setattr(ci, "PKG_PAGE", 2)
+
+    async def fake_invoke(client, catalog, node_id, tool, args):  # type: ignore[no-untyped-def]
+        hit = [n for n in names if n.startswith(args.get("name_prefix", ""))]
+        page = [{"name": n, "version": "1"} for n in hit[: args["max"]]]
+        return {
+            "total_installed": 3,
+            "truncated": len(hit) > args["max"],
+            "packages": page,
+        }, None
+
+    monkeypatch.setattr(ci, "_invoke", fake_invoke)
+    out, _ = await ci._collect_packages(None, [], "n1")  # type: ignore[arg-type]
+    assert (
+        out is not None and out["truncated"] is True
+    ), "short snapshot never reconciles"
+    assert "lib*" in out["note"]
