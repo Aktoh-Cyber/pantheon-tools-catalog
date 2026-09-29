@@ -220,7 +220,8 @@ def test_threatfox_export_normalises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_threatfox_api_requires_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("THREATFOX_AUTH_KEY", raising=False)
-    with pytest.raises(feeds.FeedError, match="THREATFOX_AUTH_KEY"):
+    monkeypatch.delenv("LIBRARIAN_STATE_DIR", raising=False)
+    with pytest.raises(feeds.FeedError, match="Auth-Key"):
         feeds.load_ioc_feed("threatfox-api")
 
 
@@ -232,6 +233,16 @@ def test_configured_feeds_switch_to_api_with_a_key(
     assert feeds.configured_ioc_feeds() == ["threatfox-recent", "feodo"]
     monkeypatch.setenv("THREATFOX_AUTH_KEY", "k")
     assert feeds.configured_ioc_feeds() == ["threatfox-api", "feodo"]
+
+
+def test_threatfox_key_from_state_dir_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("THREATFOX_AUTH_KEY", raising=False)
+    monkeypatch.setenv("LIBRARIAN_STATE_DIR", str(tmp_path))
+    assert feeds.threatfox_key() == ""
+    (tmp_path / "threatfox-auth-key").write_text("abc123\n")
+    assert feeds.threatfox_key() == "abc123"
 
 
 # --- EOL -----------------------------------------------------------------------

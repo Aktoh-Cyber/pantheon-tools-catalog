@@ -7,7 +7,8 @@ Feeds are pluggable (``feeds`` input, else ``LIBRARIAN_IOC_FEEDS``, default
   (IPs, domains, URLs -> their host, file hashes).
 - ``feodo``: Feodo Tracker's botnet C2 IP blocklist (key-less).
 - ``threatfox-api``: ThreatFox's API, 7 days. It needs an abuse.ch Auth-Key
-  in ``THREATFOX_AUTH_KEY``; when that is set it replaces ``threatfox-recent``.
+  (``$LIBRARIAN_STATE_DIR/threatfox-auth-key`` or ``THREATFOX_AUTH_KEY``);
+  when one is set it replaces ``threatfox-recent``.
 
 Observables are read from any environment node (not Vulnerability,
 Indicator, Finding, ToolGap or Package) property with one of these names:
@@ -191,7 +192,7 @@ async def _run(inp: MatchIocsInput) -> MatchIocsResult:
             got = await asyncio.to_thread(feeds.load_ioc_feed, f)
         except feeds.FeedError as exc:
             res.feeds[f] = f"unavailable: {exc}"
-            if "Auth-Key" in str(exc) or "THREATFOX_AUTH_KEY" in str(exc):
+            if "Auth-Key" in str(exc):
                 res.needs_key.append(f)
             continue
         res.feeds[f] = f"ok ({len(got)} indicators)"

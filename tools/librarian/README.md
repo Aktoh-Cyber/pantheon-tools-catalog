@@ -123,8 +123,9 @@ of it in one call.
    - `enrich_eol`: endoflife.date for OS releases and runtimes; `eol_*`
      properties and `Finding` (tool `eol`) per end-of-life item.
    - `match_iocs`: abuse.ch ThreatFox (48 h export) + Feodo Tracker, key-less.
-     Set `THREATFOX_AUTH_KEY` (abuse.ch Auth-Key) to use ThreatFox's API
-     (7 days) instead; `LIBRARIAN_IOC_FEEDS` picks feeds.
+     Put an abuse.ch Auth-Key in `$LIBRARIAN_STATE_DIR/threatfox-auth-key`
+     (0600; `/opt/data/graph/threatfox-auth-key` on a tenant) or the
+     `THREATFOX_AUTH_KEY` env to use ThreatFox's API (7 days) instead; `LIBRARIAN_IOC_FEEDS` picks feeds.
 
 Feeds are fetched by the tenant container, never by customer nodes, and cached
 under `$LIBRARIAN_STATE_DIR/feeds`. Every node and edge carries the usual

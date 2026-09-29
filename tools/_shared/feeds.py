@@ -14,8 +14,11 @@ Feeds, all free and key-less by default:
   ``glibc``), while a node lists BINARY packages (``libssl3``, ``libc6``);
   without this map most packages would silently match nothing.
 - abuse.ch ThreatFox ``export/json/recent`` (last 48 h) and Feodo Tracker's
-  C2 IP blocklist. ThreatFox's API (a wider window) needs an Auth-Key; set
-  ``THREATFOX_AUTH_KEY`` to use it instead of the export.
+  C2 IP blocklist. ThreatFox's API (a wider window) needs an abuse.ch
+  Auth-Key: put it in ``$LIBRARIAN_STATE_DIR/threatfox-auth-key`` (0600; on a
+  pantheon tenant ``/opt/data/graph/threatfox-auth-key``) or the
+  ``THREATFOX_AUTH_KEY`` env of the librarian-tools server, and the API
+  replaces the export. The file keeps the key out of agent-readable config.
 
 Responses are cached under ``$LIBRARIAN_STATE_DIR/feeds`` (in-process only when
 that is unset), so a re-run inside the TTL makes no network calls.
@@ -383,6 +386,21 @@ def package_index(
 DEFAULT_IOC_FEEDS = ("threatfox-recent", "feodo")
 
 
+def threatfox_key() -> str:
+    """The abuse.ch Auth-Key: env ``THREATFOX_AUTH_KEY``, else the
+    ``threatfox-auth-key`` file in the state dir; "" when neither is set."""
+    key = os.environ.get("THREATFOX_AUTH_KEY", "").strip()
+    if key:
+        return key
+    raw = os.environ.get("LIBRARIAN_STATE_DIR", "").strip()
+    if raw:
+        try:
+            return (Path(raw) / "threatfox-auth-key").read_text().strip()
+        except OSError:
+            return ""
+    return ""
+
+
 def configured_ioc_feeds() -> list[str]:
     raw = os.environ.get("LIBRARIAN_IOC_FEEDS", "").strip()
     feeds = (
@@ -391,7 +409,7 @@ def configured_ioc_feeds() -> list[str]:
         else list(DEFAULT_IOC_FEEDS)
     )
     # A ThreatFox key widens the window from the 48 h export to 7 days of API.
-    if os.environ.get("THREATFOX_AUTH_KEY", "").strip():
+    if threatfox_key():
         feeds = ["threatfox-api" if f == "threatfox-recent" else f for f in feeds]
     return feeds
 
@@ -458,10 +476,11 @@ def load_ioc_feed(feed: str) -> list[dict[str, Any]]:
         ]
         return _normalize_threatfox(entries, feed)
     if feed == "threatfox-api":
-        key = os.environ.get("THREATFOX_AUTH_KEY", "").strip()
+        key = threatfox_key()
         if not key:
             raise FeedError(
-                "threatfox-api needs THREATFOX_AUTH_KEY (abuse.ch Auth-Key)"
+                "threatfox-api needs an abuse.ch Auth-Key (THREATFOX_AUTH_KEY, "
+                "or the threatfox-auth-key file in LIBRARIAN_STATE_DIR)"
             )
         body = cached_fetch(
             feed,
