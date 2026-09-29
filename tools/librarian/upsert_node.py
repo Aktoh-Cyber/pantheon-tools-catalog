@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from tools._shared import write_journal
+from tools._shared.json_safe import properties as json_safe_properties
 from tools._shared.neo4j_client import get_driver
 from tools._shared.provenance import (
     RESERVED_PROVENANCE_KEYS,
@@ -137,7 +138,7 @@ async def run(input: UpsertNodeInput) -> UpsertNodeToolResponse:
         result=UpsertNodeResult(
             element_id=str(node.element_id),
             labels=sorted(node.labels),
-            properties=dict(node),
+            properties=json_safe_properties(node),
             created=created,
         ),
     )

@@ -32,6 +32,8 @@ from tools._shared.cypher_safety import (
     CypherWriteRejected,
     assert_read_only,
 )
+from tools._shared.json_safe import properties as json_safe_properties
+from tools._shared.json_safe import to_json_safe
 from tools._shared.neo4j_client import get_driver
 
 
@@ -144,7 +146,7 @@ def _ingest_graph_value(
             nodes[node_id] = GraphNode(
                 id=node_id,
                 labels=sorted(value.labels),
-                properties=dict(value),
+                properties=json_safe_properties(value),
             )
     elif isinstance(value, Relationship):
         edge_id = str(value.element_id)
@@ -154,7 +156,7 @@ def _ingest_graph_value(
                 type=value.type,
                 source=str(value.start_node.element_id) if value.start_node else "",
                 target=str(value.end_node.element_id) if value.end_node else "",
-                properties=dict(value),
+                properties=json_safe_properties(value),
             )
         if value.start_node is not None:
             _ingest_graph_value(value.start_node, nodes, edges)
@@ -186,7 +188,7 @@ def _serialize_value(value: Any) -> Any:
             "_type": "Node",
             "id": str(value.element_id),
             "labels": sorted(value.labels),
-            "properties": dict(value),
+            "properties": json_safe_properties(value),
         }
     if isinstance(value, Relationship):
         return {
@@ -195,7 +197,7 @@ def _serialize_value(value: Any) -> Any:
             "type": value.type,
             "source": str(value.start_node.element_id) if value.start_node else "",
             "target": str(value.end_node.element_id) if value.end_node else "",
-            "properties": dict(value),
+            "properties": json_safe_properties(value),
         }
     if isinstance(value, Path):
         return {
@@ -207,4 +209,5 @@ def _serialize_value(value: Any) -> Any:
         return [_serialize_value(item) for item in value]
     if isinstance(value, dict):
         return {k: _serialize_value(v) for k, v in value.items()}
-    return value
+    # Temporal / spatial / bytes scalars (e.g. RETURN n.commissioned_at).
+    return to_json_safe(value)

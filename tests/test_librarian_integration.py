@@ -505,3 +505,62 @@ async def test_purge_session_drops_incident_relationships(neo4j_clean) -> None:
         )
     )
     assert leftover.result.rows[0]["c"] == 0
+
+
+# --- wire encoding (2026-09-29 regression) ----------------------------------
+
+
+async def test_every_response_json_encodes_with_real_provenance(neo4j_clean) -> None:
+    """The MCP server sends `response.model_dump_json()`. Against a real
+    store, `commissioned_at` comes back as neo4j.time.DateTime. Before the
+    fix that made EVERY successful write, and every node-returning query,
+    fail to encode, and the agent saw a failure for a write that landed.
+    Encode exactly what goes on the wire."""
+    import json
+
+    from tools.librarian.__main__ import _encode_response
+
+    node = await run_upsert_node(
+        UpsertNodeInput(
+            label="Host", merge_keys=["node_id"],
+            props={"node_id": "n-1", "name": "tek.local"},
+            commissioned_by="infosec", session_id="sweep-1",
+        )
+    )
+    await run_upsert_node(
+        UpsertNodeInput(
+            label="Finding", merge_keys=["key"],
+            props={"key": "tek.local|secret-scan", "result": "CLEAN"},
+            commissioned_by="infosec", session_id="sweep-1",
+        )
+    )
+    edge = await run_upsert_edge(
+        UpsertEdgeInput(
+            rel_type="HAS_FINDING",
+            **{"from": EdgeEndpoint(label="Host", merge_keys=["node_id"],
+                                    match={"node_id": "n-1"})},
+            to=EdgeEndpoint(label="Finding", merge_keys=["key"],
+                            match={"key": "tek.local|secret-scan"}),
+            props={}, commissioned_by="infosec", session_id="sweep-1",
+        )
+    )
+    rows = await run_query(QueryInput(
+        cypher="MATCH (h:Host)-[r]->(f) RETURN h, r, f, h.commissioned_at AS at"
+    ))
+    for resp in (node, edge, rows):
+        assert resp.ok is True, resp.error
+        # model_dump_json directly: the source must be JSON-safe, not
+        # just rescued by the backstop encoder.
+        wire = json.loads(resp.model_dump_json(exclude_none=True))
+        assert json.loads(_encode_response(resp)) == wire
+    n = json.loads(node.model_dump_json())
+    assert isinstance(n["result"]["properties"]["commissioned_at"], str)
+    e = json.loads(edge.model_dump_json())
+    assert isinstance(e["result"]["properties"]["commissioned_at"], str)
+    q = json.loads(rows.model_dump_json())
+    assert isinstance(q["result"]["rows"][0]["at"], str)
+    assert isinstance(q["result"]["rows"][0]["h"]["properties"]["commissioned_at"], str)
+    assert all(
+        isinstance(x["properties"]["commissioned_at"], str)
+        for x in q["result"]["graph"]["nodes"]
+    )

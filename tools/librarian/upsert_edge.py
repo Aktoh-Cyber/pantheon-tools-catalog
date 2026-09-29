@@ -28,6 +28,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from tools._shared import write_journal
+from tools._shared.json_safe import properties as json_safe_properties
 from tools._shared.neo4j_client import get_driver
 from tools._shared.provenance import (
     ReservedKeyConflict,
@@ -168,7 +169,7 @@ async def run(input: UpsertEdgeInput) -> UpsertEdgeToolResponse:
             if rel.start_node else "",
             target_element_id=str(rel.end_node.element_id)
             if rel.end_node else "",
-            properties=dict(rel),
+            properties=json_safe_properties(rel),
             created=created,
         ),
     )
