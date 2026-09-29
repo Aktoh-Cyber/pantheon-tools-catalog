@@ -28,6 +28,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from tools._shared import write_journal
 from tools._shared.neo4j_client import get_driver
 
 
@@ -103,21 +104,27 @@ async def run(input: PurgeSessionInput) -> PurgeSessionToolResponse:
     )
     params = {"session_id": input.session_id}
 
+    payload = input.model_dump(mode="json")
     try:
         driver = get_driver()
         async with driver.session() as session:
             result = await session.run(cypher, params)
             summary = await result.consume()
     except Exception as exc:
-        return PurgeSessionToolResponse(
-            ok=False,
-            error=f"{type(exc).__name__}: {exc}",
-            details={
-                "tool": "librarian.purge_session",
-                "session_id": input.session_id,
-            },
+        error = f"{type(exc).__name__}: {exc}"
+        details: dict[str, Any] = {
+            "tool": "librarian.purge_session",
+            "session_id": input.session_id,
+            "recorded": False,
+        }
+        pending = write_journal.record_failure(
+            "librarian.purge_session", error, payload
         )
+        if pending:
+            details["pending_id"] = pending
+        return PurgeSessionToolResponse(ok=False, error=error, details=details)
 
+    write_journal.record_success("librarian.purge_session", payload)
     return PurgeSessionToolResponse(
         ok=True,
         result=PurgeSessionResult(

@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from tools._shared import write_journal
 from tools._shared.neo4j_client import get_driver
 from tools._shared.provenance import (
     RESERVED_PROVENANCE_KEYS,
@@ -105,6 +106,7 @@ async def run(input: UpsertNodeInput) -> UpsertNodeToolResponse:
         )
 
     cypher, params = _build_cypher(input)
+    payload = input.model_dump(mode="json")
     try:
         driver = get_driver()
         async with driver.session() as session:
@@ -112,19 +114,22 @@ async def run(input: UpsertNodeInput) -> UpsertNodeToolResponse:
             record = await result.single()
             summary = await result.consume()
     except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
         return UpsertNodeToolResponse(
             ok=False,
-            error=f"{type(exc).__name__}: {exc}",
-            details={"tool": "librarian.upsert_node"},
+            error=error,
+            details=_store_failure_details(error, payload),
         )
 
     if record is None:
+        error = "MERGE returned no record — Neo4j misbehaving?"
         return UpsertNodeToolResponse(
             ok=False,
-            error="MERGE returned no record — Neo4j misbehaving?",
-            details={"tool": "librarian.upsert_node"},
+            error=error,
+            details=_store_failure_details(error, payload),
         )
 
+    write_journal.record_success(TOOL, payload)
     node = record["n"]
     created = summary.counters.nodes_created > 0
     return UpsertNodeToolResponse(
@@ -136,6 +141,19 @@ async def run(input: UpsertNodeInput) -> UpsertNodeToolResponse:
             created=created,
         ),
     )
+
+
+TOOL = "librarian.upsert_node"
+
+
+def _store_failure_details(error: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The graph store did not take the write. Journal it (kept for
+    librarian.apply_pending) and tell the caller it was NOT recorded."""
+    details: dict[str, Any] = {"tool": TOOL, "recorded": False}
+    pending = write_journal.record_failure(TOOL, error, payload)
+    if pending:
+        details["pending_id"] = pending
+    return details
 
 
 def _build_cypher(

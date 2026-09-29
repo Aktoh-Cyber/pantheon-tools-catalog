@@ -27,6 +27,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from tools._shared import write_journal
 from tools._shared.neo4j_client import get_driver
 from tools._shared.provenance import (
     ReservedKeyConflict,
@@ -87,6 +88,9 @@ class UpsertEdgeToolResponse(BaseModel):
     details: dict[str, Any] | None = None
 
 
+TOOL = "librarian.upsert_edge"
+
+
 async def run(input: UpsertEdgeInput) -> UpsertEdgeToolResponse:
     """Run the MERGE on the relationship + return the resulting edge."""
     # --- validate merge_keys all present in match for each endpoint.
@@ -120,6 +124,7 @@ async def run(input: UpsertEdgeInput) -> UpsertEdgeToolResponse:
         )
 
     cypher, params = _build_cypher(input)
+    payload = input.model_dump(mode="json", by_alias=True)
     try:
         driver = get_driver()
         async with driver.session() as session:
@@ -127,11 +132,15 @@ async def run(input: UpsertEdgeInput) -> UpsertEdgeToolResponse:
             record = await result.single()
             summary = await result.consume()
     except Exception as exc:
-        return UpsertEdgeToolResponse(
-            ok=False,
-            error=f"{type(exc).__name__}: {exc}",
-            details={"tool": "librarian.upsert_edge"},
-        )
+        # Store-level failure: journal it for librarian.apply_pending.
+        # (A missing endpoint below is the caller's to fix and is NOT
+        # journaled.)
+        error = f"{type(exc).__name__}: {exc}"
+        details: dict[str, Any] = {"tool": TOOL, "recorded": False}
+        pending = write_journal.record_failure(TOOL, error, payload)
+        if pending:
+            details["pending_id"] = pending
+        return UpsertEdgeToolResponse(ok=False, error=error, details=details)
 
     if record is None:
         return UpsertEdgeToolResponse(
@@ -147,6 +156,7 @@ async def run(input: UpsertEdgeInput) -> UpsertEdgeToolResponse:
             },
         )
 
+    write_journal.record_success(TOOL, payload)
     rel = record["r"]
     created = summary.counters.relationships_created > 0
     return UpsertEdgeToolResponse(

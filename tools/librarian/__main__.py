@@ -8,8 +8,8 @@ Pantheon's per-profile config.yaml registers this in the
 `mcp_servers` block — Hermes spawns the process at boot and routes
 `librarian.*` tool calls through it.
 
-Each of the 5 tools (schema, query, explain, upsert_node,
-upsert_edge) is registered with its pydantic input schema; the
+Each tool (schema, query, explain, upsert_node, upsert_edge,
+purge_session, apply_pending) is registered with its pydantic input schema; the
 server validates the input against the schema, calls the tool's
 `run()`, and returns the response as a JSON-serializable dict.
 
@@ -35,7 +35,9 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 
+from tools._shared import write_journal
 from tools.librarian import (
+    apply_pending,
     explain,
     purge_session,
     query,
@@ -85,6 +87,15 @@ _TOOLS: dict[str, _ToolEntry] = {
         "LibrarianWrite. Stamps provenance.",
         upsert_edge.UpsertEdgeInput,
         upsert_edge.run,
+    ),
+    "librarian.apply_pending": (
+        "List (confirm=false) or re-apply (confirm=true) commissions the "
+        "graph store failed to take. Store-level write failures are kept "
+        "as pending instead of being lost; replays are idempotent MERGEs. "
+        "Use this when a write failed, and before telling anyone the graph "
+        "is up to date.",
+        apply_pending.ApplyPendingInput,
+        apply_pending.run,
     ),
     "librarian.purge_session": (
         "DETACH DELETE every node carrying session_id == <input>. "
@@ -172,8 +183,25 @@ def _error_json(error: str, details: dict[str, Any]) -> str:
     return json.dumps({"ok": False, "error": error, "details": details})
 
 
+def _catalog_version() -> str:
+    # Pantheon runs the catalog from a git clone on PYTHONPATH (not an
+    # installed distribution), so read the version from pyproject.toml.
+    import tomllib
+    from pathlib import Path
+
+    try:
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        return str(data["project"]["version"])
+    except Exception:
+        return "unknown"
+
+
 async def _amain() -> None:
     logging.basicConfig(level=logging.INFO)
+    # Tell the tenant (via the sidecar) that the agent runtime actually
+    # started this server, not merely that it is configured.
+    write_journal.mark_server_started(_catalog_version())
     server = _build_server()
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
